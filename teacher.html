@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>教师端 - 多班级智能评测管理</title>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .class-selector { background: #f0f7ff; padding: 10px 20px; border-radius: 8px; border: 1px solid #bae0ff; display: flex; align-items: center; gap: 15px; margin-bottom: 20px;}
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; background: white; border-radius: 8px; cursor: pointer; font-weight: bold; color: #555; border: 2px solid transparent; }
+        .tab.active { border-color: #1890ff; color: #1890ff; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        .table-container { max-height: 400px; overflow-y: auto; border-radius: 8px; border: 1px solid #f0f0f0; margin-top: 15px; background: white; }
+        table { width: 100%; border-collapse: collapse; margin-top: 0;}
+        thead th { position: sticky; top: 0; background: #fafafa; z-index: 10; padding: 12px; border-bottom: 2px solid #e8e8e8; text-align: left; }
+        tbody td { padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: left; }
+        .btn { padding: 5px 10px; cursor: pointer; border: none; border-radius: 4px; margin: 2px; color: white;}
+        .btn-add { background: #1890ff; } .btn-del { background: #ff4d4f; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h2 style="margin: 0;">👨‍🏫 教师作业管理中心</h2>
+    <div>
+        <span style="color:#e67e22; font-weight:bold; margin-right:15px;" id="ai-quota-display">✨ AI 额度: 加载中...</span>
+        欢迎，<span id="current-user" style="color: #1890ff; font-weight: bold; margin-right: 15px;"></span>
+        <button class="btn btn-del" onclick="logout()">退出登录</button>
+    </div>
+</div>
+
+<div class="class-selector">
+    <strong style="color: #1890ff;">🏫 当前管理班级：</strong>
+    <select id="classSelect" onchange="onClassChange()" style="padding: 5px 10px; font-size: 16px; border-radius: 4px;"></select>
+    <button class="btn" style="background: #2ecc71;" onclick="joinNewClass()">➕ 绑定新班级</button>
+</div>
+
+<div class="tabs">
+    <div class="tab active" onclick="switchTab('current')" id="tab-current">🚀 当前进行中作业</div>
+    <div class="tab" onclick="switchTab('history')" id="tab-history">🗂️ 往期作业查看</div>
+</div>
+
+<div class="panel active" id="panel-current">
+    <div class="card" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center; background: #e6f7ff; border-left: 5px solid #1890ff;">
+        <h3 style="margin:0;">当前作业：<span id="curr-assign-name" style="color:#d35400;">加载中...</span></h3>
+        <span style="flex:1"></span>
+        <input id="newAssignName" placeholder="新作业名称" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; width: 160px;">
+        <input id="assignPassRate" type="number" placeholder="合格率(%) 默认80" value="80" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; width: 120px;">
+        <button class="btn" style="background: #52c41a; padding: 8px 15px;" onclick="createNewAssignment()">➕ 布置新作业</button>
+        <button class="btn" style="background: #e74c3c; padding: 8px 15px; font-weight:bold; margin-left:10px;" onclick="openLoopMode()">🎙️ 开启讲台循环模式</button>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>题目管理</h2>
+            <div style="margin-bottom:10px;">
+                <input id="nT" placeholder="题目" style="width:120px;"> <input id="nA" placeholder="答案" style="width:120px;"> 
+                <select id="nL">
+                    <option value="zh">语文</option><option value="en">英语</option><option value="science">数理化</option>
+                </select>
+                <button class="btn btn-add" onclick="addQ()">手工添加</button>
+                <button class="btn" style="background:#8e44ad;" onclick="openBankModal()">🗂️ 题库</button>
+                <button class="btn" style="background:#f39c12;" onclick="openAiModal()">✨ AI</button>
+            </div>
+            <div class="table-container" style="max-height: 250px;">
+                <table id="qTable"><thead><tr><th>内容</th><th>答案</th><th>操作</th></tr></thead><tbody></tbody></table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 style="margin:0;">学生成绩状态榜 (实时刷新)</h2>
+                <div>
+                    <!-- 🌟 新增：独立查看作业模式或循环模式 -->
+                    <select id="scoreModeSelect" onchange="switchScoreMode()" style="padding: 8px; font-weight:bold; color:#e74c3c; border:1px solid #e74c3c; border-radius: 4px; margin-right: 10px;">
+                        <option value="normal">🏠 查看课后作业数据</option>
+                        <option value="loop">🎙️ 查看讲台循环数据</option>
+                    </select>
+                    <button class="btn" style="background:#34495e;" onclick="viewClassOverview()">📊 本模式全班总览</button>
+                </div>
+            </div>
+            <div class="table-container">
+                <table id="sTable"><thead><tr><th>学号</th><th>题号</th><th>得分</th><th>状态</th><th>录音回听</th></tr></thead><tbody></tbody></table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="panel" id="panel-history">
+    <div class="card" style="margin-bottom: 20px;">
+        <h3>请选择要查看的往期作业：<select id="historySelect" style="padding: 8px; font-size: 16px; margin-left: 10px;" onchange="loadHistoryData()"></select></h3>
+    </div>
+    <div class="grid">
+        <div class="card"><div class="table-container"><table id="hqTable"><thead><tr><th>题目</th><th>答案</th></tr></thead><tbody></tbody></table></div></div>
+        <div class="card"><div class="table-container"><table id="hsTable"><thead><tr><th>学号</th><th>题号</th><th>得分</th><th>状态</th><th>录音</th></tr></thead><tbody></tbody></table></div></div>
+    </div>
+</div>
+
+<!-- ================= 弹窗区 ================= -->
+<div id="overviewModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:99; align-items:center; justify-content:center;">
+    <div style="background:white; width:600px; max-height:80vh; overflow-y:auto; padding:30px; border-radius:10px;">
+        <h2 style="margin-top:0;">📊 全班完成情况总览</h2>
+        <table style="width:100%; border-collapse: collapse; margin-top:20px;">
+            <thead><tr style="background:#f0f0f0;">
+                <th style="padding:10px; text-align:left; border-bottom:2px solid #ddd;">学生学号</th>
+                <th style="padding:10px; text-align:left; border-bottom:2px solid #ddd;">综合状态</th>
+                <th style="padding:10px; text-align:left; border-bottom:2px solid #ddd;">未达标详情</th>
+            </tr></thead>
+            <tbody id="overviewTbody"></tbody>
+        </table>
+        <div style="margin-top:20px; text-align:right;"><button class="btn" style="background:#3498db; font-size:16px; padding:10px 20px;" onclick="document.getElementById('overviewModal').style.display='none'">关闭概览</button></div>
+    </div>
+</div>
+
+<div id="bankModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99; align-items:center; justify-content:center;">
+    <div style="background:white; width:600px; padding:20px; border-radius:10px;">
+        <h3>从公共题库选题</h3>
+        <select id="bankSubj" onchange="loadModalBank()" style="padding:5px; margin-bottom:10px;">
+            <option value="zh">语文题库</option><option value="en">英语题库</option><option value="science">数理化题库</option>
+        </select>
+        <div style="max-height:300px; overflow-y:auto; border:1px solid #ddd;">
+            <table id="modalBankTable" style="width:100%; text-align:left;"><tbody></tbody></table>
+        </div>
+        <div style="margin-top:15px; text-align:right;"><button class="btn" style="background:#ccc; color:#333;" onclick="document.getElementById('bankModal').style.display='none'">关闭</button></div>
+    </div>
+</div>
+
+<div id="aiModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99; align-items:center; justify-content:center;">
+    <div style="background:white; width:500px; padding:20px; border-radius:10px;">
+        <h3>✨ AI 教研助手出题</h3>
+        <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <select id="aiSubj" style="padding:8px; flex:1; border:1px solid #ccc; border-radius:4px;"><option value="zh">📖 语文</option><option value="en">🅰️ 英语</option><option value="science">🔢 数理化</option></select>
+            <input id="aiCount" type="number" placeholder="生成题数" value="3" min="1" max="10" style="padding:8px; width:120px; border:1px solid #ccc; border-radius:4px;">
+        </div>
+        <input id="aiKeyword" placeholder="请输入具体知识点或年龄段要求..." style="padding:8px; width:100%; box-sizing:border-box; margin-bottom:15px; border:1px solid #ccc; border-radius:4px;">
+        <button class="btn" style="background:#f39c12; width:100%; padding:10px; font-weight:bold; font-size:16px;" onclick="doAiGenerate()" id="aiGenBtn">耗费 1 额度生成题目</button>
+        <div style="margin-top:15px; text-align:right;"><button class="btn" style="background:#ccc; color:#333;" onclick="document.getElementById('aiModal').style.display='none'">关闭</button></div>
+    </div>
+</div>
+
+<script>
+    const API = window.location.origin + "/api";
+    let currentClassId = null, currentAssignId = null, refreshTimer = null;
+    
+    const currentUsername = localStorage.getItem('username');
+    if (!currentUsername || localStorage.getItem('role') !== 'teacher') { 
+        alert("无权访问！"); window.location.href = 'login.html'; 
+    } else { 
+        document.getElementById('current-user').innerText = currentUsername; 
+        document.getElementById('ai-quota-display').innerText = `✨ AI 额度: ${localStorage.getItem('ai_quota') || 0} 次`;
+    }
+    function logout() { localStorage.clear(); window.location.href = 'login.html'; }
+
+    function openLoopMode() {
+        if(!currentAssignId) return alert("请先布置一个作业！");
+        window.open(`class_loop.html?class_id=${currentClassId}&assign_id=${currentAssignId}`, '_blank');
+    }
+
+    function switchScoreMode() {
+        document.querySelector("#sTable tbody").innerHTML = '';
+        loadScores();
+    }
+
+    async function viewClassOverview() {
+        if(!currentAssignId) return alert("当前无作业！");
+        const mode = document.getElementById('scoreModeSelect').value;
+        document.getElementById('overviewModal').style.display = 'flex';
+        document.getElementById('overviewTbody').innerHTML = `<tr><td colspan="3">正在统计全班数据...</td></tr>`;
+        try {
+            const res = await fetch(`${API}/admin/class_overview?assignment_id=${currentAssignId}&mode=${mode}`);
+            const data = await res.json();
+            document.getElementById('overviewTbody').innerHTML = data.map(s => {
+                let statusColor = s.status === '全部合格' ? '#2ecc71' : (s.status === '未交' ? '#95a5a6' : '#e74c3c');
+                return `<tr><td style="padding:10px; border-bottom:1px solid #eee; font-weight:bold;">${s.student_id}</td><td style="padding:10px; border-bottom:1px solid #eee; color:${statusColor}; font-weight:bold;">${s.status}</td><td style="padding:10px; border-bottom:1px solid #eee; color:#666;">${s.detail}</td></tr>`;
+            }).join('');
+        } catch(e) { document.getElementById('overviewTbody').innerHTML = `<tr><td colspan="3" style="color:red;">数据加载失败</td></tr>`; }
+    }
+
+    function openBankModal() { if(!currentAssignId) return alert("请先布置作业！"); document.getElementById('bankModal').style.display = 'flex'; loadModalBank(); }
+    async function loadModalBank() {
+        const subj = document.getElementById('bankSubj').value;
+        const data = await (await fetch(`${API}/bank?subject=${subj}`)).json();
+        document.getElementById('modalBankTable').innerHTML = data.map(q => `<tr><td style="padding:10px; border-bottom:1px solid #eee;"><strong>${q.text}</strong><br><span style="color:#888; font-size:12px;">答案: ${q.answer} | 标杆: ${q.baseline_score}</span></td><td style="width:80px;"><button class="btn btn-add" onclick="importFromBank('${q.text}', '${q.answer}', '${subj}', ${q.baseline_score})">导入</button></td></tr>`).join('');
+    }
+    async function importFromBank(t, a, l, b) {
+        await fetch(`${API}/questions?assignment_id=${currentAssignId}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: t, answer: a, lang: l, baseline_score: b, is_fixed_baseline: 1}) }); alert("导入成功！"); loadQ();
+    }
+    
+    function openAiModal() { if(!currentAssignId) return alert("请先布置作业！"); document.getElementById('aiModal').style.display = 'flex'; }
+    async function doAiGenerate() {
+        const keyword = document.getElementById('aiKeyword').value.trim(), subj = document.getElementById('aiSubj').value, count = document.getElementById('aiCount').value || 3;
+        if(!keyword) return alert("请输入知识点！");
+        document.getElementById('aiGenBtn').innerText = "AI 正在构思中..."; document.getElementById('aiGenBtn').disabled = true;
+        try {
+            const res = await fetch(`${API}/ai/generate`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: currentUsername, keyword: keyword, subject: subj, count: count}) });
+            const d = await res.json();
+            if(d.status === "error") { alert(d.msg); return; }
+            localStorage.setItem('ai_quota', d.remain_quota); document.getElementById('ai-quota-display').innerText = `✨ AI 额度: ${d.remain_quota} 次`;
+            const questions = d.data;
+            if(questions && questions.length > 0) {
+                for (let q of questions) { await fetch(`${API}/questions?assignment_id=${currentAssignId}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: q.text, answer: q.answer, lang: subj}) }); }
+                document.getElementById('aiModal').style.display = 'none'; alert(`成功生成并导入 ${questions.length} 道题目！`); loadQ(); 
+            } else { alert("AI 返回格式有误！"); }
+        } catch(e) { alert("网络错误！"); } finally { document.getElementById('aiGenBtn').innerText = "耗费 1 额度生成"; document.getElementById('aiGenBtn').disabled = false; }
+    }
+
+    async function loadClasses() {
+        const classes = await (await fetch(`${API}/teacher/classes?username=${currentUsername}`)).json();
+        document.getElementById('classSelect').innerHTML = classes.map(c => `<option value="${c.id}">班级：${c.class_code} (${c.name})</option>`).join('');
+        if(classes.length > 0) { currentClassId = classes[0].id; switchTab('current'); } else { document.getElementById('curr-assign-name').innerText = "未加入班级"; alert("请点击绑定新班级"); }
+    }
+    async function joinNewClass() {
+        const code = prompt("请输入班级码：");
+        if(code) { await fetch(`${API}/teacher/join_class`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:currentUsername, class_code:code})}); loadClasses(); }
+    }
+    function onClassChange() { currentClassId = document.getElementById('classSelect').value; switchTab('current'); }
+    function switchTab(tab) {
+        document.getElementById('tab-current').classList.toggle('active', tab==='current'); document.getElementById('tab-history').classList.toggle('active', tab==='history');
+        document.getElementById('panel-current').classList.toggle('active', tab==='current'); document.getElementById('panel-history').classList.toggle('active', tab==='history');
+        if(!currentClassId) return;
+        if(tab === 'current') { loadCurrentAssign(); refreshTimer = setInterval(loadScores, 4000); } else { clearInterval(refreshTimer); loadHistoryList(); }
+    }
+
+    async function loadCurrentAssign() {
+        const assign = await (await fetch(`${API}/assignment/current?class_id=${currentClassId}`)).json();
+        if(assign.id) {
+            if (currentAssignId !== assign.id) { currentAssignId = assign.id; document.querySelector("#sTable tbody").innerHTML = ''; }
+            document.getElementById('curr-assign-name').innerText = `${assign.name} (达标线: ${assign.passing_rate * 100}%)`; loadQ(); loadScores();
+        } else { currentAssignId = null; document.getElementById('curr-assign-name').innerText = "暂无作业"; document.querySelector("#qTable tbody").innerHTML = ''; document.querySelector("#sTable tbody").innerHTML = ''; }
+    }
+    async function createNewAssignment() {
+        const name = document.getElementById('newAssignName').value.trim(), rate = document.getElementById('assignPassRate').value || 80;
+        if(!name) return alert("请输入作业名称！");
+        if(confirm(`确定布置 "${name}"，达标线为 ${rate}% 吗？`)) {
+            await fetch(`${API}/assignment/new`, { method: 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({class_id: currentClassId, name: name, passing_rate: rate}) });
+            document.getElementById('newAssignName').value = ''; loadCurrentAssign();
+        }
+    }
+
+    async function loadQ() {
+        if(!currentAssignId) return;
+        const qs = await (await fetch(`${API}/questions?assignment_id=${currentAssignId}`)).json();
+        document.querySelector("#qTable tbody").innerHTML = qs.map(q => `<tr><td>${q.text}</td><td>${q.answer}</td><td><button class="btn btn-del" onclick="delQ(${q.id})">删</button></td></tr>`).join('');
+    }
+    async function addQ() {
+        if(!currentAssignId) return alert("请先布置作业！");
+        const t = document.getElementById('nT').value, a = document.getElementById('nA').value, l = document.getElementById('nL').value;
+        if(t && a) { await fetch(`${API}/questions?assignment_id=${currentAssignId}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text:t, answer:a, lang:l}) }); document.getElementById('nT').value = ''; document.getElementById('nA').value = ''; loadQ(); }
+    }
+    async function delQ(id) { if(confirm("删除该题？")) { await fetch(`${API}/questions/${id}`, {method:'DELETE'}); loadQ(); } }
+
+    // 🌟 核心修复：更纯净的DOM比对算法，绝不让浏览器误杀播放器
+    async function loadScores() {
+        if(!currentAssignId || document.getElementById('overviewModal').style.display === 'flex') return;
+        try {
+            const mode = document.getElementById('scoreModeSelect').value;
+            const res = await fetch(`${API}/admin/scores?assignment_id=${currentAssignId}&mode=${mode}`);
+            if(!res.ok) return;
+            const data = await res.json();
+            const tbody = document.querySelector("#sTable tbody");
+            let newKeys = new Set(); 
+
+            data.forEach(s => {
+                const isUnsub = s.is_total_missing || s.is_partial_missing;
+                const key = s.is_total_missing ? `row-${s.student_id}-all` : `row-${s.student_id}-${s.question_id}`;
+                newKeys.add(key);
+                
+                let statusHTML = s.is_total_missing ? '<span style="color:#999; font-weight:bold;">全部未交</span>' : (s.is_partial_missing ? '<span style="color:#faad14; font-weight:bold;">漏交该题</span>' : (s.is_passed ? '<span style="color:#2ecc71; font-weight:bold;">✅ 达标</span>' : '<span style="color:#e74c3c; font-weight:bold;">❌ 未达标</span>'));
+                let qDisplay = s.is_total_missing ? '全部' : 'Q' + s.question_id;
+                
+                // 使用原生的 audio 标签，不用 source 嵌套，浏览器更稳定
+                const audioHTML = isUnsub ? '<span style="color:#ccc;">-</span>' : `<audio src="${API}/audio/${s.audio_path}" controls preload="metadata" style="height:40px; width:220px;"></audio>`;
+
+                const trHTML = `<td>${s.student_id}</td><td>${qDisplay}</td>
+                    <td style="color:${isUnsub ? '#999' : '#1890ff'}; font-weight:bold">${s.score}</td>
+                    <td>${statusHTML}</td><td>${audioHTML}</td>`;
+                
+                let row = document.getElementById(key);
+                if(row) {
+                    // 数据没变就不重新渲染，保护正在播放的录音
+                    if (row.dataset.audio !== (s.audio_path || "") || row.dataset.score !== String(s.score)) {
+                        row.innerHTML = trHTML;
+                        row.dataset.audio = s.audio_path || "";
+                        row.dataset.score = String(s.score);
+                    }
+                } else { 
+                    row = document.createElement('tr'); 
+                    row.id = key; row.innerHTML = trHTML; 
+                    row.dataset.audio = s.audio_path || "";
+                    row.dataset.score = String(s.score);
+                    tbody.appendChild(row); 
+                }
+            });
+            // 清理旧节点
+            Array.from(tbody.children).forEach(row => { if (!newKeys.has(row.id)) row.remove(); });
+            // 按序重排
+            data.forEach(s => { const key = s.is_total_missing ? `row-${s.student_id}-all` : `row-${s.student_id}-${s.question_id}`; const row = document.getElementById(key); if(row) tbody.appendChild(row); });
+        } catch(err) { console.log("等待网络响应中..."); }
+    }
+
+    async function loadHistoryList() {
+        const assigns = await (await fetch(`${API}/assignments?class_id=${currentClassId}`)).json();
+        const history = assigns.filter(a => a.is_active === 0);
+        document.getElementById('historySelect').innerHTML = history.length ? history.map(a => `<option value="${a.id}">${a.name}</option>`).join('') : '<option>暂无</option>';
+        if(history.length) loadHistoryData();
+    }
+    async function loadHistoryData() {
+        const hId = document.getElementById('historySelect').value; if(!hId) return;
+        document.querySelector("#hqTable tbody").innerHTML = (await (await fetch(`${API}/questions?assignment_id=${hId}`)).json()).map(q => `<tr><td>${q.text}</td><td>${q.answer}</td></tr>`).join('');
+        document.querySelector("#hsTable tbody").innerHTML = (await (await fetch(`${API}/admin/scores?assignment_id=${hId}`)).json()).map(s => {
+            const isUnsub = s.is_total_missing || s.is_partial_missing;
+            let statusHTML = s.is_total_missing ? '<span style="color:#999; font-weight:bold;">全部未交</span>' : (s.is_partial_missing ? '<span style="color:#faad14; font-weight:bold;">漏交该题</span>' : (s.is_passed ? '✅' : '❌'));
+            let qDisplay = s.is_total_missing ? '全部题目' : 'Q' + s.question_id;
+            return `<tr><td>${s.student_id}</td><td>${qDisplay}</td><td style="color:${isUnsub ? '#999' : '#1890ff'}; font-weight:bold">${s.score}</td><td>${statusHTML}</td><td>${isUnsub ? '-' : `<audio src="${API}/audio/${s.audio_path}" controls preload="metadata" style="height:40px; width:220px;"></audio>`}</td></tr>`;
+        }).join('');
+    }
+    loadClasses(); 
+</script>
+</body>
+</html>

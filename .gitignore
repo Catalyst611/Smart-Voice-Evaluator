@@ -1,0 +1,9 @@
+# 忽略数据库和日志
+*.db
+*.sqlite3
+output.log
+
+# 忽略缓存和临时文件
+__pycache__/
+*.pyc
+stored_audio/

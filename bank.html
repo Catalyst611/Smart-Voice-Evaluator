@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>公共教研题库管理</title>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
+        .header { background: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; background: white; border-radius: 8px; cursor: pointer; font-weight: bold; color: #555; }
+        .tab.active { background: #1890ff; color: white; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        input { padding: 8px; border-radius: 4px; border: 1px solid #ccc; margin-right: 10px;}
+        button { padding: 8px 15px; cursor: pointer; border: none; border-radius: 4px; background: #52c41a; color: white; font-weight: bold;}
+        table { width: 100%; border-collapse: collapse; margin-top: 15px;}
+        th, td { padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: left; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h2 style="margin: 0;">📚 智能语音评测 - 公共教研题库中心</h2>
+    <p style="color:#666; font-size:14px;">支持批量TXT导入。注意文件必须是 <b>UTF-8</b> 编码，格式为：题目 | 答案 | 分数</p>
+</div>
+
+<div class="tabs">
+    <div class="tab active" onclick="switchSubj('zh')" id="t-zh">📖 语文题库</div>
+    <div class="tab" onclick="switchSubj('en')" id="t-en">🅰️ 英语题库</div>
+    <div class="tab" onclick="switchSubj('science')" id="t-science">🔢 数理化题库</div>
+</div>
+
+<div class="card" style="display:flex; gap:20px;">
+    <div style="flex:1; background: #e6f7ff; padding:15px; border-left: 5px solid #1890ff; border-radius:8px;">
+        <h3>✍️ 手工单题录入</h3>
+        <input id="qCategory" placeholder="小分类 (如:苏教版三年级)" style="width:180px; margin-bottom:10px;"><br>
+        <input id="qText" placeholder="题目内容" style="width:180px;">
+        <input id="qAnswer" placeholder="标准答案" style="width:180px;">
+        <input id="qBase" type="number" placeholder="标杆分" style="width:120px;">
+        <button onclick="addBankQ()">录入题库</button>
+    </div>
+
+    <div style="flex:1; background: #fffbe6; padding:15px; border-left: 5px solid #faad14; border-radius:8px;">
+        <h3>📁 TXT 批量导入</h3>
+        <input id="txtCategory" placeholder="这批题的分类" style="width:150px;">
+        <input type="file" id="txtFile" accept=".txt">
+        <button style="background:#faad14;" onclick="importTxt()">开始导入</button>
+    </div>
+</div>
+
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">本库题目列表</h3>
+        <!-- 🌟 新增：批量删除当前科目所有题库 -->
+        <button style="background:#ff4d4f;" onclick="clearBank()">🗑️ 一键清空本科目</button>
+    </div>
+    <table id="bTable">
+        <thead><tr><th>ID</th><th>分类属性</th><th>题目内容</th><th>标准答案</th><th>基准分</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<script>
+    const API = window.location.origin + "/api";
+    let curSubj = 'zh';
+
+    function switchSubj(subj) {
+        curSubj = subj;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(`t-${subj}`).classList.add('active');
+        loadBank();
+    }
+
+    async function loadBank() {
+        const data = await (await fetch(`${API}/bank?subject=${curSubj}`)).json();
+        document.querySelector("#bTable tbody").innerHTML = data.map(q => `
+            <tr>
+                <td>#${q.id}</td>
+                <td><span style="background:#eee; padding:2px 8px; border-radius:4px; font-size:12px;">${q.category || '默认'}</span></td>
+                <td>${q.text}</td><td style="color:#666">${q.answer}</td>
+                <td><span style="color:#1890ff; font-weight:bold;">${q.baseline_score}</span></td>
+                <td><button style="background:#ff4d4f; padding:5px 10px;" onclick="delBankQ(${q.id})">删除</button></td>
+            </tr>
+        `).join('');
+    }
+
+    async function addBankQ() {
+        const t = document.getElementById('qText').value.trim(), a = document.getElementById('qAnswer').value.trim(), c = document.getElementById('qCategory').value.trim(), b = document.getElementById('qBase').value || 85;
+        if(!t || !a) return alert("题目和答案不能为空！"); 
+        await fetch(`${API}/bank`, { method: 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({subject: curSubj, category: c, text: t, answer: a, baseline_score: b}) });
+        document.getElementById('qText').value = ''; document.getElementById('qAnswer').value = ''; loadBank();
+    }
+
+    async function importTxt() {
+        const fileInput = document.getElementById('txtFile');
+        const cate = document.getElementById('txtCategory').value.trim() || '批量导入';
+        if(!fileInput.files.length) return alert("请先选择一个TXT文件！");
+        const fd = new FormData(); fd.append('file', fileInput.files[0]); fd.append('subject', curSubj); fd.append('category', cate);
+        try {
+            const data = await (await fetch(`${API}/bank/import_txt`, { method: 'POST', body: fd })).json();
+            if(data.status === 'success') { alert(`成功导入 ${data.count} 道题目！`); fileInput.value = ''; loadBank(); }
+        } catch(e) { alert("导入失败，请检查文件编码是否为 UTF-8！"); }
+    }
+
+    async function delBankQ(id) { if(confirm("确定删除吗？")) { await fetch(`${API}/bank?id=${id}`, {method: 'DELETE'}); loadBank(); } }
+    
+    // 🌟 一键清空调用
+    async function clearBank() {
+        if(confirm(`⚠️ 警告：确定要彻底清空【${curSubj}】下的所有题库吗？清空后无法恢复！`)) {
+            await fetch(`${API}/bank/clear?subject=${curSubj}`, { method: 'DELETE' });
+            alert("已清空！");
+            loadBank();
+        }
+    }
+
+    loadBank();
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>讲台沉浸式循环考核</title>
+    <style>
+        body { font-family: 'PingFang SC', sans-serif; display: flex; height: 100vh; margin: 0; background: #2c3e50; color: white; flex-direction: column; align-items: center; justify-content: center; }
+        .box { background: #34495e; width: 80%; max-width: 800px; padding: 50px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); text-align: center; }
+        h1 { font-size: 48px; margin-bottom: 10px; color: #ecf0f1; }
+        .subtitle { font-size: 24px; color: #f1c40f; margin-bottom: 40px; }
+        .question-text { font-size: 36px; font-weight: bold; margin: 30px 0; min-height: 100px; color: #3498db; }
+        .btn-giant { width: 200px; height: 200px; border-radius: 50%; border: none; background: #e74c3c; color: white; cursor: pointer; font-size: 24px; font-weight: bold; transition: 0.3s; box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4); margin: 20px auto; display: block;}
+        .recording { animation: pulse 1s infinite; background: #c0392b; }
+        #sys-status { font-size: 20px; color: #2ecc71; margin-top: 20px; }
+        .current-stu { position: absolute; top: 20px; left: 30px; font-size: 24px; color: #bdc3c7; }
+        .exit-btn { position: absolute; top: 20px; right: 30px; padding: 10px 20px; background: #7f8c8d; border: none; color: white; border-radius: 8px; cursor: pointer;}
+        @keyframes pulse { 0% { transform: scale(1); box-shadow: 0 0 20px rgba(231, 76, 60, 0.8); } 50% { transform: scale(1.1); box-shadow: 0 0 60px rgba(231, 76, 60, 1);} 100% { transform: scale(1); box-shadow: 0 0 20px rgba(231, 76, 60, 0.8); } }
+    </style>
+</head>
+<body>
+
+<div class="current-stu">当前考核者：<span id="stuName" style="color:#f1c40f; font-weight:bold;">等待唤醒...</span></div>
+<button class="exit-btn" onclick="window.close()">退出循环模式</button>
+
+<div class="box">
+    <h1 id="mainTitle">🎙️ 课堂智能语音评测</h1>
+    <div class="subtitle" id="subTitle">考核即将开始</div>
+    <div class="question-text" id="qText" style="display:none;"></div>
+    
+    <button class="btn-giant" id="actionBtn" onclick="handleAction()">【首次激活】<br>请点击我</button>
+    
+    <div id="sys-status">系统闲置中...</div>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const classId = urlParams.get('class_id');
+    const assignId = urlParams.get('assign_id');
+    const API = window.location.origin + "/api";
+    
+    let qs =[];           
+    let curQIdx = 0;       
+    let currentStudent = null; 
+    let failedQs =[];     
+    let systemState = 'IDLE'; 
+    let mediaRec, chunks =[], audioCtx, analyser, dataArr, silenceStart = null, flowTimeout = null;
+
+    window.onload = async () => {
+        if(!classId || !assignId) return alert("请从教师端点击开启。");
+        const res = await fetch(`${API}/questions?assignment_id=${assignId}`);
+        qs = await res.json();
+    };
+
+    function speakSys(txt, callback) {
+        window.speechSynthesis.cancel();
+        let msg = new SpeechSynthesisUtterance(txt);
+        msg.lang = 'zh-CN';
+        msg.rate = 1.1; 
+        if(callback) msg.onend = callback;
+        window.speechSynthesis.speak(msg);
+    }
+
+    function handleAction() {
+        if(flowTimeout) clearTimeout(flowTimeout);
+        // 支持手动点击停止当前录音
+        if(mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; } 
+        
+        if(systemState === 'IDLE') startRecording('IDENTIFY'); 
+        else if (systemState === 'VERIFY') startRecording('VERIFY_ANS');
+        else if (systemState === 'EXAM') startRecording('EXAM_ANS');
+    }
+
+    async function startRecording(purpose) {
+        window.speechSynthesis.cancel();
+        try {
+            if(!mediaRec || mediaRec.state === "inactive") {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRec = new MediaRecorder(stream); chunks =[];
+                mediaRec.ondataavailable = e => chunks.push(e.data);
+                mediaRec.onstop = () => uploadAudio(purpose);
+                
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const src = audioCtx.createMediaStreamSource(stream); 
+                analyser = audioCtx.createAnalyser(); 
+                src.connect(analyser); 
+                dataArr = new Uint8Array(analyser.frequencyBinCount);
+                
+                mediaRec.start(); silenceStart = null; checkVAD();
+                
+                let btn = document.getElementById('actionBtn');
+                btn.classList.add('recording');
+                btn.innerHTML = "正在聆听<br>(可点击手动停止)";
+                document.getElementById('sys-status').innerText = "录音中...";
+            }
+        } catch(e) { alert("麦克风权限被拒绝！请检查网站设置。"); }
+    }
+
+    function checkVAD() {
+        if(!mediaRec || mediaRec.state !== "recording") return;
+        analyser.getByteFrequencyData(dataArr);
+        let avg = dataArr.reduce((a,b)=>a+b, 0)/dataArr.length;
+        if(avg < 35) {  // 提升抗噪阈值，避免背景音干扰
+            if(!silenceStart) silenceStart = Date.now(); 
+            if(Date.now() - silenceStart > 2000) { mediaRec.stop(); return; } 
+        } else silenceStart = null;
+        requestAnimationFrame(checkVAD);
+    }
+
+    async function uploadAudio(purpose) {
+        document.getElementById('actionBtn').classList.remove('recording');
+        document.getElementById('sys-status').innerText = "处理中，请稍后...";
+        
+        const fd = new FormData();
+        fd.append('user_audio', new Blob(chunks));
+
+        if (purpose === 'IDENTIFY') {
+            const res = await (await fetch(`${API}/recognize_command`, { method: 'POST', body: fd })).json();
+            const matchRes = await (await fetch(`${API}/students/match?class_id=${classId}&text=${res.text || ""}`)).json();
+            
+            if (matchRes.status === 'success') {
+                currentStudent = matchRes.username;
+                systemState = 'VERIFY';
+                document.getElementById('subTitle').innerText = "身份确认中";
+                
+                let spokenName = currentStudent.split('').join(' '); // 让 AI 单字播报名字
+                speakSys(`识别到你是 ${spokenName} ，对吗？如果对，请回答 是。`, () => {
+                    flowTimeout = setTimeout(() => startRecording('VERIFY_ANS'), 500);
+                });
+            } else {
+                speakSys("未找到你的名字，请大声再报一次。", () => {
+                    flowTimeout = setTimeout(() => startRecording('IDENTIFY'), 500);
+                });
+            }
+        } 
+        else if (purpose === 'VERIFY_ANS') {
+            const res = await (await fetch(`${API}/recognize_command`, { method: 'POST', body: fd })).json();
+            const vt = res.text || "";
+            
+            // 🌟 核心升级：高精度语音意图判断算法
+            const yesMatch = vt.match(/是|对|没错|嗯/g) ||[];
+            const noMatch = vt.match(/不|没|错/g) ||[];
+            
+            let confirmResult = 'AMBIGUOUS';
+            
+            if (yesMatch.length > 0 && noMatch.length === 0) {
+                confirmResult = 'YES'; // 100%肯定
+            } else if (noMatch.length > 0 && yesMatch.length === 0) {
+                confirmResult = 'NO'; // 100%否定
+            } else if (vt.includes("不是") && !vt.replace(/不是/g, '').includes("是")) {
+                confirmResult = 'NO'; // 明确说“不是”
+            } else if (vt.includes("不对") && !vt.replace(/不对/g, '').includes("对")) {
+                confirmResult = 'NO'; // 明确说“不对”
+            } else {
+                confirmResult = 'AMBIGUOUS'; // 既有肯定又有否定，或者什么都没听清
+            }
+
+            // 🎯 根据意图结果分配动作
+            if (confirmResult === 'YES') {
+                systemState = 'EXAM';
+                document.getElementById('stuName').innerText = currentStudent;
+                curQIdx = 0; failedQs =[];
+                document.getElementById('subTitle').innerText = "考试进行中";
+                document.getElementById('qText').style.display = 'block';
+                speakSys(`好的，开始考核。`, () => { playNextQuestion(); });
+            } else if (confirmResult === 'NO') {
+                systemState = 'IDLE'; currentStudent = null;
+                document.getElementById('subTitle').innerText = "请重新报名字";
+                speakSys("好的，请重新大声报出你的名字。", () => {
+                    flowTimeout = setTimeout(() => startRecording('IDENTIFY'), 500);
+                });
+            } else {
+                // 触发模糊状态的二次确认追问
+                speakSys("抱歉没听清，请准确回答：是，或者，不是。", () => {
+                    flowTimeout = setTimeout(() => startRecording('VERIFY_ANS'), 500);
+                });
+            }
+        }
+        else if (purpose === 'EXAM_ANS') {
+            document.getElementById('sys-status').innerText = "正在打分...";
+            fd.append('standard_answer', qs[curQIdx].answer);
+            fd.append('language', qs[curQIdx].lang);
+            fd.append('student_id', currentStudent);
+            fd.append('question_id', qs[curQIdx].id); 
+            fd.append('mode', 'loop'); // 核心：通知后端存入 loop_scores 表
+            
+            const d = await (await fetch(`${window.location.origin}/recognize_and_evaluate`, { method: 'POST', body: fd })).json();
+            
+            if (!d.is_passed) failedQs.push(curQIdx + 1);
+
+            let resultText = d.is_passed ? `回答正确！得分${d.score}。` : `未达标，得分${d.score}。`;
+            document.getElementById('sys-status').innerText = resultText;
+            
+            curQIdx++;
+            if (curQIdx < qs.length) {
+                speakSys(resultText + "下一题。", () => { playNextQuestion(); });
+            } else {
+                let summary = `考核结束！`;
+                if (failedQs.length === 0) summary += `恭喜你，全部通关！`;
+                else summary += `你错了第 ${failedQs.join('、')} 题。`; 
+                
+                // 全自动无缝循环闭环
+                speakSys(summary + "接下来自动呼叫下一位同学。请上前报名字。", () => {
+                    systemState = 'IDLE'; currentStudent = null; curQIdx = 0; failedQs =[];
+                    document.getElementById('stuName').innerText = "等待唤醒...";
+                    document.getElementById('subTitle').innerText = "准备就绪，请下一位同学上前";
+                    document.getElementById('qText').style.display = 'none';
+                    document.getElementById('sys-status').innerText = "系统自动循环中...";
+                    
+                    flowTimeout = setTimeout(() => startRecording('IDENTIFY'), 500);
+                });
+            }
+        }
+    }
+
+    async function playNextQuestion() {
+        let q = qs[curQIdx];
+        document.getElementById('qText').innerText = `Q${curQIdx+1}: ${q.text}`;
+        document.getElementById('actionBtn').innerHTML = "正在播放题目<br>请听题";
+        try {
+            const res = await fetch(`${window.location.origin}/synthesize_question`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: q.text, language: q.lang}) });
+            currentAudio = new Audio(URL.createObjectURL(await res.blob()));
+            currentAudio.onended = () => { 
+                document.getElementById('actionBtn').innerHTML = "聆听回答中";
+                flowTimeout = setTimeout(() => startRecording('EXAM_ANS'), 500); 
+            };
+            currentAudio.play();
+        } catch(e) { alert("语音合成错误"); }
+    }
+</script>
+</body>
+</html>

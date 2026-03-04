@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>系统登录/注册</title>
+    <style>
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; background: #f5f7f9; align-items: center; justify-content: center; }
+        .auth-box { background: white; width: 350px; padding: 40px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; }
+        .tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #eee; }
+        .tab { flex: 1; padding: 10px; cursor: pointer; color: #888; font-weight: bold; }
+        .tab.active { color: #3498db; border-bottom: 2px solid #3498db; }
+        input, select, button { width: 100%; box-sizing: border-box; margin-bottom: 15px; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+        button { background: #3498db; color: white; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #2980b9; }
+        .msg { color: #e74c3c; font-size: 14px; margin-bottom: 10px; height: 20px;}
+        .hint { font-size: 12px; color: #888; text-align: left; margin-top: -10px; margin-bottom: 15px; display: none;}
+    </style>
+</head>
+<body>
+<div class="auth-box">
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('login')" id="tab-login">登录</div>
+        <div class="tab" onclick="switchTab('register')" id="tab-register">注册账号</div>
+    </div>
+    <div class="msg" id="msgBox"></div>
+    <input type="text" id="username" placeholder="用户名/学号">
+    <input type="password" id="password" placeholder="密码">
+    <select id="roleSelect" style="display:none;" onchange="updateHint()">
+        <option value="student">我是学生</option>
+        <option value="teacher">我是老师</option>
+    </select>
+    <input type="text" id="classCode" placeholder="班级邀请码" style="display:none;">
+    <div id="classHint" class="hint">学生请填写老师发放的班级码加入</div>
+    <button id="actionBtn" onclick="doAction()">登 录</button>
+</div>
+<script>
+    // 🌟 核心：动态自适应当前网址，绝不报错
+    const API = window.location.origin + "/api";
+    
+    let mode = 'login';
+    function switchTab(m) {
+        mode = m;
+        document.getElementById('tab-login').classList.toggle('active', m === 'login');
+        document.getElementById('tab-register').classList.toggle('active', m === 'register');
+        document.getElementById('roleSelect').style.display = m === 'register' ? 'block' : 'none';
+        document.getElementById('classCode').style.display = m === 'register' ? 'block' : 'none';
+        document.getElementById('classHint').style.display = m === 'register' ? 'block' : 'none';
+        document.getElementById('actionBtn').innerText = m === 'register' ? '注 册' : '登 录';
+        document.getElementById('msgBox').innerText = ''; updateHint();
+    }
+    function updateHint() {
+        const role = document.getElementById('roleSelect').value;
+        const hint = document.getElementById('classHint');
+        if(mode === 'register') hint.innerText = role === 'student' ? "学生请填写老师发放的已有班级码加入" : "老师可输入任意新班级码来创建独立班级";
+    }
+    async function doAction() {
+        const btn = document.getElementById('actionBtn');
+        const u = document.getElementById('username').value, p = document.getElementById('password').value;
+        const r = document.getElementById('roleSelect').value, c = document.getElementById('classCode').value;
+        const msgBox = document.getElementById('msgBox');
+        if (!u || !p) { msgBox.innerText = "账号密码不能为空"; return; }
+        if (mode === 'register' && !c) { msgBox.innerText = "必须填写班级码"; return; }
+        
+        msgBox.style.color = "#333"; msgBox.innerText = "处理中...";
+        btn.disabled = true; // 防连击
+
+        const endpoint = mode === 'login' ? '/login' : '/register';
+        const payload = mode === 'login' ? {username: u, password: p} : {username: u, password: p, role: r, class_code: c};
+        try {
+            const res = await fetch(API + endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.msg || "请求失败");
+            if (mode === 'register') {
+                msgBox.style.color = "#2ecc71"; msgBox.innerText = "注册成功，请登录";
+                setTimeout(() => switchTab('login'), 1500);
+            } else {
+                localStorage.setItem('username', data.username); localStorage.setItem('role', data.role);
+                msgBox.style.color = "#2ecc71"; msgBox.innerText = "登录成功，正在跳转...";
+                setTimeout(() => { window.location.href = data.role === 'teacher' ? 'teacher.html' : 'student.html'; }, 500);
+            }
+        } catch (e) { msgBox.style.color = "#e74c3c"; msgBox.innerText = e.message; }
+        finally { btn.disabled = false; }
+    }
+</script>
+</body>
+</html>
