@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>学生练习系统</title>
+    <title>学生个人练习系统</title>
     <style>
         body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; background: #f5f7f9; }
         #start-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 999; }
@@ -16,7 +16,6 @@
         #loading-msg, #cmd-msg { color: #3498db; font-weight: bold; margin: 15px 0; display: none; }
         .score-num { font-size: 64px; font-weight: bold; transition: color 0.3s;}
         
-        /* 红绿比对框样式 */
         .diff-box { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 15px; text-align: left; font-size: 18px; line-height: 1.8; border: 1px solid #ddd;}
         .diff-title { font-size: 14px; color: #888; margin-bottom: 5px; font-weight: bold; }
         
@@ -49,7 +48,6 @@
         <div id="resArea" style="display:none;">
             <div class="score-num" id="score">0</div>
             
-            <!-- 🌟 核心：红绿错题比对展示区 -->
             <div class="diff-box">
                 <div class="diff-title">🎯 您的回答比对分析：</div>
                 <div id="diffHtml"></div>
@@ -84,13 +82,21 @@
 
     async function startSystem() {
         document.getElementById('start-overlay').style.display = 'none';
+        
+        // 手机端音频锁破解
+        let unlockMsg = new SpeechSynthesisUtterance('');
+        window.speechSynthesis.speak(unlockMsg);
+        new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA').play().catch(()=>{});
+
         currentAssign = await (await fetch(`${API}/api/student/current_assignment?username=${currentUsername}`)).json();
         if (!currentAssign.id) { alert("老师还没有布置任何作业！"); document.getElementById('assign-name').innerText = "暂无作业"; return; }
         document.getElementById('assign-name').innerText = currentAssign.name;
         qs = await (await fetch(`${API}/api/questions?assignment_id=${currentAssign.id}`)).json();
         document.getElementById('qList').innerHTML = qs.map((q, i) => `<div class="q-item" id="i-${i}" onclick="manualSel(${i})">题目 ${i+1}</div>`).join('');
+        
         const msg = new SpeechSynthesisUtterance(`欢迎，本次练习作业是：${currentAssign.name}。`);
-        msg.lang = 'zh-CN'; msg.onend = () => { if(qs.length > 0) sel(0); }; window.speechSynthesis.speak(msg);
+        msg.lang = 'zh-CN'; msg.onend = () => { if(qs.length > 0) sel(0); }; 
+        window.speechSynthesis.speak(msg);
     }
 
     async function sel(i) {
@@ -101,18 +107,17 @@
         document.getElementById('nextBtn').style.display = (i < qs.length-1) ? 'inline-block' : 'none';
         playQuestionAudio(qs[i].text, qs[i].lang);
     }
+    
     function manualSel(i) { interruptFlow(); sel(i); }
     function manualNext() { interruptFlow(); if(curIdx < qs.length-1) sel(curIdx + 1); }
-   function manualToggleRec() {
-        // 如果当前正在录音，点击按钮则纯粹停止录音
-        if (mediaRec && mediaRec.state === "recording") {
-            mediaRec.stop();
-            return;
-        }
-        // 否则，打断其它发音流程，开启录音
+    
+    // 🌟 手动启停录音逻辑
+    function manualToggleRec() {
+        if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
         interruptFlow(); 
         toggleRec('ANSWER'); 
     }
+
     async function playQuestionAudio(text, lang) {
         try {
             const res = await fetch(`${API}/synthesize_question`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text, language: lang}) });
@@ -126,11 +131,8 @@
         if(!mediaRec || mediaRec.state !== "recording") return;
         analyser.getByteFrequencyData(dataArr);
         let avg = dataArr.reduce((a,b)=>a+b, 0)/dataArr.length;
-        // 🌟 把 15 改为 35 (数值越大，抗背景杂音能力越强，更容易判定停顿)
-        if(avg < 35) { 
-            if(!silenceStart) silenceStart = Date.now(); 
-            if(Date.now() - silenceStart > 2000) { mediaRec.stop(); return; } 
-        } else silenceStart = null;
+        // 普通家庭作业模式，环境安静，15 阈值足够了
+        if(avg < 15) { if(!silenceStart) silenceStart = Date.now(); if(Date.now() - silenceStart > 2000) { mediaRec.stop(); return; } } else silenceStart = null;
         requestAnimationFrame(checkVAD);
     }
 
@@ -146,10 +148,10 @@
                 const src = audioCtx.createMediaStreamSource(stream); analyser = audioCtx.createAnalyser(); src.connect(analyser); dataArr = new Uint8Array(analyser.frequencyBinCount);
                 mediaRec.start(); silenceStart = null; checkVAD();
                 let btn = document.getElementById('recBtn'); btn.disabled = false; btn.classList.add('recording');
-                btn.innerHTML = mode === 'ANSWER' ? `正在录音<br><span style="font-size:12px; font-weight:normal;">(停顿2秒自动停止)</span>` : `请说指令`;
-            } else mediaRec.stop();
+                btn.innerHTML = mode === 'ANSWER' ? `正在录音<br><span style="font-size:12px; font-weight:normal;">(说完可点击结束)</span>` : `请说指令`;
+            }
         } catch(err) {
-            alert("无法打开麦克风！请确保网址是 https 开头，并在浏览器设置中允许麦克风权限！");
+            alert("无法打开麦克风！请允许麦克风权限！");
             document.getElementById('recBtn').disabled = false;
             document.getElementById('recBtn').innerText = "点击重试录音";
         }
@@ -160,12 +162,12 @@
         window.speechSynthesis.cancel(); const loadVoice = new SpeechSynthesisUtterance("正在评分，请稍后"); loadVoice.lang = 'zh-CN'; window.speechSynthesis.speak(loadVoice);
 
         const fd = new FormData(); fd.append('user_audio', new Blob(chunks)); fd.append('standard_answer', qs[curIdx].answer); fd.append('language', qs[curIdx].lang); fd.append('student_id', currentUsername); fd.append('question_id', qs[curIdx].id); 
+        fd.append('mode', 'normal'); // 标识为普通作业
+        
         const d = await (await fetch(`${API}/recognize_and_evaluate`, { method: 'POST', body: fd })).json();
         
         document.getElementById('loading-msg').style.display = 'none'; document.getElementById('resArea').style.display = 'block';
         document.getElementById('score').innerText = d.score; document.getElementById('score').style.color = d.is_passed ? "#2ecc71" : "#e74c3c";
-        
-        // 🌟 注入红绿比对 HTML
         document.getElementById('diffHtml').innerHTML = d.diff_html;
         
         window.speechSynthesis.cancel();
