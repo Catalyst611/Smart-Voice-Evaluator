@@ -2,30 +2,40 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>学生个人练习系统</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学生个人练习系统 (多模态监考)</title>
     <style>
         body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; background: #f5f7f9; }
         #start-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 999; }
         .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; overflow-y: auto; }
-        .main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative;}
         .card { background: white; width: 85%; max-width: 700px; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; }
         .q-item { padding: 15px; border-bottom: 1px solid #34495e; cursor: pointer; transition: 0.2s; }
         .active { background: #3498db; }
         .btn-rec { width: 140px; height: 140px; border-radius: 50%; border: none; background: #e74c3c; color: white; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.3s;}
+        .btn-rec:disabled { background: #7f8c8d; cursor: not-allowed; animation: none; box-shadow: none; }
         .recording { animation: pulse 1.2s infinite; background: #c0392b; }
         #loading-msg, #cmd-msg { color: #3498db; font-weight: bold; margin: 15px 0; display: none; }
         .score-num { font-size: 64px; font-weight: bold; transition: color 0.3s;}
-        
         .diff-box { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 15px; text-align: left; font-size: 18px; line-height: 1.8; border: 1px solid #ddd;}
-        .diff-title { font-size: 14px; color: #888; margin-bottom: 5px; font-weight: bold; }
+        
+        #camera-container { position: absolute; top: 20px; right: 20px; border: 3px solid #bdc3c7; border-radius: 10px; overflow: hidden; width: 120px; height: 160px; background: #000; display:none;}
+        #videoElement { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        
+        /* 🌟 温和悬浮窗警告，不影响任何按钮点击 */
+        #cheat-toast { display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(231,76,60,0.95); color: white; padding: 15px 30px; border-radius: 30px; font-size: 18px; font-weight: bold; z-index: 9999; box-shadow: 0 5px 15px rgba(231,76,60,0.5); pointer-events: none;}
         
         @keyframes pulse { 0% { transform: scale(1); box-shadow: 0 0 20px rgba(231, 76, 60, 0.6); } 50% { transform: scale(1.1); box-shadow: 0 0 40px rgba(231, 76, 60, 0.8);} 100% { transform: scale(1); box-shadow: 0 0 20px rgba(231, 76, 60, 0.6); } }
     </style>
 </head>
 <body>
+
+<div id="cheat-toast">⚠️ 提示：背诵期间请闭上双眼，本次异常已被标记！</div>
+
 <div id="start-overlay">
     <h1>智能口语练习系统</h1>
-    <button onclick="startSystem()" style="padding: 15px 40px; font-size: 20px; cursor: pointer; border-radius: 30px; border: none; background: #2ecc71; color: white;">点击开始作业</button>
+    <p id="cam-tip" style="color:#f1c40f; margin-bottom:20px;">系统检测作业配置中...</p>
+    <button id="startBtn" onclick="startSystem()" style="padding: 15px 40px; font-size: 20px; cursor: pointer; border-radius: 30px; border: none; background: #2ecc71; color: white;" disabled>加载中</button>
 </div>
 
 <div class="sidebar">
@@ -34,6 +44,11 @@
 </div>
 
 <div class="main">
+    <div id="camera-container">
+        <video id="videoElement" autoplay muted playsinline></video>
+        <canvas id="canvasElement" style="display:none;"></canvas>
+    </div>
+
     <div style="margin-bottom: 20px; display: flex; justify-content: space-between; width: 85%; max-width: 700px;">
         <span style="font-weight: bold; color: #2c3e50;">当前登录: <span id="current-user" style="color:#3498db"></span></span>
         <button onclick="logout()" style="padding: 5px 15px; border:none; background:#e74c3c; color:white; border-radius:4px; cursor:pointer;">退出登录</button>
@@ -47,15 +62,10 @@
 
         <div id="resArea" style="display:none;">
             <div class="score-num" id="score">0</div>
-            
-            <div class="diff-box">
-                <div class="diff-title">🎯 您的回答比对分析：</div>
-                <div id="diffHtml"></div>
-            </div>
-            
+            <div class="diff-box"><div class="diff-title">🎯 回答比对分析：</div><div id="diffHtml"></div></div>
             <div style="margin-top: 20px;">
-                <button onclick="manualSel(curIdx)" style="padding: 10px 20px; cursor:pointer;">重新回答</button>
-                <button id="nextBtn" onclick="manualNext()" style="padding: 10px 20px; background:#3498db; color:white; border:none; cursor:pointer;">下一题</button>
+                <button onclick="manualSel(curIdx)" style="padding: 10px 20px;">重新回答(可消除标记)</button>
+                <button id="nextBtn" onclick="manualNext()" style="padding: 10px 20px; background:#3498db; color:white; border:none;">下一题</button>
             </div>
         </div>
     </div>
@@ -63,14 +73,29 @@
 
 <script>
     const API = window.location.origin;
-    let qs = [], curIdx = 0, mediaRec, chunks =[], audioCtx, analyser, dataArr, silenceStart = null;
+    let qs =[], curIdx = 0, mediaRec, chunks =[], audioCtx, analyser, dataArr, silenceStart = null;
     let flowTimeout = null, currentAudio = null, recMode = 'ANSWER', currentAssign = null;
+    
+    let videoStream = null, visionInterval = null, cheatCounter = 0, visionMode = 0, currentCheatFlag = 0;
 
     const currentUsername = localStorage.getItem('username');
-    if (!currentUsername || localStorage.getItem('role') !== 'student') { alert("请先以学生身份登录！"); window.location.href = 'login.html'; } 
+    if (!currentUsername || localStorage.getItem('role') !== 'student') { alert("请先登录！"); window.location.href = 'login.html'; } 
     else { document.getElementById('current-user').innerText = currentUsername; }
-    function logout() { localStorage.clear(); window.location.href = 'login.html'; }
+    
+    window.onload = async () => {
+        currentAssign = await (await fetch(`${API}/api/student/current_assignment?username=${currentUsername}`)).json();
+        if (!currentAssign.id) { document.getElementById('cam-tip').innerText = "老师还没有布置任何作业！"; return; }
+        
+        visionMode = currentAssign.require_vision || 0;
+        let tipText = "点击下方按钮授权即可开始";
+        if (visionMode > 0) tipText = "⚠️ 本项作业老师已开启 AI 视觉监考，必须允许摄像头权限方可答题，请在背诵期间保持闭眼！";
+        
+        document.getElementById('cam-tip').innerText = tipText;
+        document.getElementById('startBtn').innerText = "点击授权并开始";
+        document.getElementById('startBtn').disabled = false;
+    };
 
+    function logout() { localStorage.clear(); window.location.href = 'login.html'; }
     function interruptFlow() {
         if (flowTimeout) clearTimeout(flowTimeout);
         if (currentAudio) { currentAudio.pause(); currentAudio = null; }
@@ -81,48 +106,93 @@
     }
 
     async function startSystem() {
-        document.getElementById('start-overlay').style.display = 'none';
-        
-        // 手机端音频锁破解
         let unlockMsg = new SpeechSynthesisUtterance('');
         window.speechSynthesis.speak(unlockMsg);
         new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA').play().catch(()=>{});
 
-        currentAssign = await (await fetch(`${API}/api/student/current_assignment?username=${currentUsername}`)).json();
-        if (!currentAssign.id) { alert("老师还没有布置任何作业！"); document.getElementById('assign-name').innerText = "暂无作业"; return; }
+        if (visionMode > 0) {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: "user" } });
+                document.getElementById('videoElement').srcObject = videoStream;
+                document.getElementById('camera-container').style.display = 'block';
+            } catch(err) {
+                alert("🚨 必须允许摄像头权限方可答题！");
+                return; 
+            }
+        }
+        document.getElementById('start-overlay').style.display = 'none';
         document.getElementById('assign-name').innerText = currentAssign.name;
         qs = await (await fetch(`${API}/api/questions?assignment_id=${currentAssign.id}`)).json();
         document.getElementById('qList').innerHTML = qs.map((q, i) => `<div class="q-item" id="i-${i}" onclick="manualSel(${i})">题目 ${i+1}</div>`).join('');
         
-        const msg = new SpeechSynthesisUtterance(`欢迎，本次练习作业是：${currentAssign.name}。`);
+        const msg = new SpeechSynthesisUtterance(`欢迎，本次作业是：${currentAssign.name}。`);
         msg.lang = 'zh-CN'; msg.onend = () => { if(qs.length > 0) sel(0); }; 
         window.speechSynthesis.speak(msg);
     }
 
+   function startVisionMonitor() {
+        if(visionMode === 0 || !videoStream) return; 
+        if(visionInterval) clearInterval(visionInterval);
+        
+        cheatCounter = 0; currentCheatFlag = 0; 
+        // 极限提速：全视频模式 200毫秒/次 (1秒5次)，关键帧模式 500毫秒/次
+        let intervalTime = visionMode === 2 ? 200 : 500; 
+        
+        visionInterval = setInterval(async () => {
+            const video = document.getElementById('videoElement');
+            const canvas = document.getElementById('canvasElement');
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const base64Img = canvas.toDataURL('image/jpeg', 0.5); 
+            try {
+                const res = await fetch(`${API}/api/vision/anti_cheat`, {
+                    method: 'POST', headers:{'Content-Type':'application/json'}, 
+                    body: JSON.stringify({image: base64Img, student_id: currentUsername, assign_id: currentAssign.id, q_id: qs[curIdx].id}) 
+                });
+                const data = await res.json();
+                
+                if(data.eye_status === 'OPEN') {
+                    cheatCounter++;
+                    // 💥 秒抓机制：只要发现 1 次睁眼（0.2秒），立刻弹窗警告并留证！
+                    if(cheatCounter >= 1) {
+                        let toast = document.getElementById('cheat-toast');
+                        toast.style.display = 'block';
+                        currentCheatFlag = 1; // 标记本题作弊
+                        setTimeout(() => { toast.style.display = 'none'; }, 4000); 
+                    }
+                } else {
+                    cheatCounter = 0; // 一旦闭眼就清零
+                }
+            } catch(e) {}
+        }, intervalTime);
+    }
     async function sel(i) {
         curIdx = i; document.querySelectorAll('.q-item').forEach(e => e.classList.remove('active')); document.getElementById(`i-${i}`).classList.add('active');
         document.getElementById('qCard').style.display = 'block'; document.getElementById('qText').innerText = qs[i].text;
         document.getElementById('resArea').style.display = 'none';
         let btn = document.getElementById('recBtn'); btn.style.display = 'inline-block'; btn.innerText = "播放中..."; btn.disabled = true;
-        document.getElementById('nextBtn').style.display = (i < qs.length-1) ? 'inline-block' : 'none';
+        if(visionInterval) clearInterval(visionInterval);
         playQuestionAudio(qs[i].text, qs[i].lang);
     }
     
     function manualSel(i) { interruptFlow(); sel(i); }
     function manualNext() { interruptFlow(); if(curIdx < qs.length-1) sel(curIdx + 1); }
-    
-    // 🌟 手动启停录音逻辑
     function manualToggleRec() {
         if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
-        interruptFlow(); 
-        toggleRec('ANSWER'); 
+        interruptFlow(); toggleRec('ANSWER'); 
     }
 
     async function playQuestionAudio(text, lang) {
         try {
             const res = await fetch(`${API}/synthesize_question`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text, language: lang}) });
             currentAudio = new Audio(URL.createObjectURL(await res.blob()));
-            currentAudio.onended = () => { document.getElementById('recBtn').innerText = "准备录音"; flowTimeout = setTimeout(() => toggleRec('ANSWER'), 1000); };
+            currentAudio.onended = () => { 
+                document.getElementById('recBtn').disabled = false;
+                document.getElementById('recBtn').innerText = "准备录音"; 
+                // 🌟 核心：0延迟无缝拉起麦克风
+                flowTimeout = setTimeout(() => toggleRec('ANSWER'), 100); 
+            };
             currentAudio.play();
         } catch(e) { document.getElementById('recBtn').disabled = false; }
     }
@@ -131,7 +201,6 @@
         if(!mediaRec || mediaRec.state !== "recording") return;
         analyser.getByteFrequencyData(dataArr);
         let avg = dataArr.reduce((a,b)=>a+b, 0)/dataArr.length;
-        // 普通家庭作业模式，环境安静，15 阈值足够了
         if(avg < 15) { if(!silenceStart) silenceStart = Date.now(); if(Date.now() - silenceStart > 2000) { mediaRec.stop(); return; } } else silenceStart = null;
         requestAnimationFrame(checkVAD);
     }
@@ -140,29 +209,29 @@
         recMode = mode;
         try{
             if(!mediaRec || mediaRec.state === "inactive") {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
                 mediaRec = new MediaRecorder(stream); chunks =[];
                 mediaRec.ondataavailable = e => chunks.push(e.data);
                 mediaRec.onstop = (mode === 'ANSWER') ? uploadAnswer : uploadCommand;
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const src = audioCtx.createMediaStreamSource(stream); analyser = audioCtx.createAnalyser(); src.connect(analyser); dataArr = new Uint8Array(analyser.frequencyBinCount);
+                
                 mediaRec.start(); silenceStart = null; checkVAD();
                 let btn = document.getElementById('recBtn'); btn.disabled = false; btn.classList.add('recording');
                 btn.innerHTML = mode === 'ANSWER' ? `正在录音<br><span style="font-size:12px; font-weight:normal;">(说完可点击结束)</span>` : `请说指令`;
+                
+                if(mode === 'ANSWER') startVisionMonitor();
             }
-        } catch(err) {
-            alert("无法打开麦克风！请允许麦克风权限！");
-            document.getElementById('recBtn').disabled = false;
-            document.getElementById('recBtn').innerText = "点击重试录音";
-        }
+        } catch(err) { alert("无法打开麦克风！"); document.getElementById('recBtn').disabled = false; }
     }
 
     async function uploadAnswer() {
+        if(visionInterval) clearInterval(visionInterval); 
         document.getElementById('recBtn').classList.remove('recording'); document.getElementById('recBtn').style.display = 'none'; document.getElementById('loading-msg').style.display = 'block';
-        window.speechSynthesis.cancel(); const loadVoice = new SpeechSynthesisUtterance("正在评分，请稍后"); loadVoice.lang = 'zh-CN'; window.speechSynthesis.speak(loadVoice);
+        window.speechSynthesis.cancel(); const loadVoice = new SpeechSynthesisUtterance("正在评分"); loadVoice.lang = 'zh-CN'; window.speechSynthesis.speak(loadVoice);
 
-        const fd = new FormData(); fd.append('user_audio', new Blob(chunks)); fd.append('standard_answer', qs[curIdx].answer); fd.append('language', qs[curIdx].lang); fd.append('student_id', currentUsername); fd.append('question_id', qs[curIdx].id); 
-        fd.append('mode', 'normal'); // 标识为普通作业
+        const fd = new FormData(); fd.append('user_audio', new Blob(chunks)); fd.append('standard_answer', qs[curIdx].answer); fd.append('language', qs[curIdx].lang); fd.append('student_id', currentUsername); fd.append('question_id', qs[curIdx].id); fd.append('mode', 'normal'); 
+        fd.append('cheat_flag', currentCheatFlag); // 上报本题作弊标记
         
         const d = await (await fetch(`${API}/recognize_and_evaluate`, { method: 'POST', body: fd })).json();
         
@@ -197,6 +266,7 @@
                 else {
                     const quitMsg = new SpeechSynthesisUtterance("练习结束，感谢使用。"); quitMsg.lang = 'zh-CN'; window.speechSynthesis.speak(quitMsg);
                     document.getElementById('cmd-msg').style.display = 'block'; document.getElementById('cmd-msg').innerText = "🎉 练习已结束。"; document.getElementById('cmd-msg').style.color = "#2ecc71"; document.getElementById('recBtn').style.display = 'none'; 
+                    if(videoStream) videoStream.getTracks().forEach(track => track.stop());
                 }
             } else {
                 if (isLast) {

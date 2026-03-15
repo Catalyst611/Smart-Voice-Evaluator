@@ -10,8 +10,8 @@ app = Flask(__name__)
 CORS(app)
 
 AUDIO_DIR = "stored_audio"
-if not os.path.exists(AUDIO_DIR): os.makedirs(AUDIO_DIR)
 OTA_DIR = "ota"
+if not os.path.exists(AUDIO_DIR): os.makedirs(AUDIO_DIR)
 if not os.path.exists(OTA_DIR): os.makedirs(OTA_DIR)
 DB_NAME = 'system.db'
 
@@ -27,25 +27,33 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT NOT NULL, ai_quota INTEGER DEFAULT 20)''')
     c.execute('''CREATE TABLE IF NOT EXISTS classes (id INTEGER PRIMARY KEY AUTOINCREMENT, class_code TEXT UNIQUE NOT NULL, name TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS user_classes (user_id INTEGER, class_id INTEGER, UNIQUE(user_id, class_id))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, class_id INTEGER NOT NULL, name TEXT NOT NULL, passing_rate REAL DEFAULT 0.8, is_active INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, class_id INTEGER NOT NULL, name TEXT NOT NULL, passing_rate REAL DEFAULT 0.8, require_vision INTEGER DEFAULT 0, is_active INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    try: c.execute("ALTER TABLE assignments ADD COLUMN require_vision INTEGER DEFAULT 0")
+    except: pass
     c.execute('''CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_id INTEGER, text TEXT, answer TEXT, lang TEXT, order_num INTEGER, baseline_score REAL DEFAULT 85.0, is_fixed_baseline INTEGER DEFAULT 0)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS scores (id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_id INTEGER, student_id TEXT, question_id INTEGER, score REAL, asr_text TEXT, audio_path TEXT, is_passed INTEGER DEFAULT 0, UNIQUE(assignment_id, student_id, question_id))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS loop_scores (id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_id INTEGER, student_id TEXT, question_id INTEGER, score REAL, asr_text TEXT, audio_path TEXT, is_passed INTEGER DEFAULT 0, UNIQUE(assignment_id, student_id, question_id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS scores (id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_id INTEGER, student_id TEXT, question_id INTEGER, score REAL, asr_text TEXT, audio_path TEXT, is_passed INTEGER DEFAULT 0, cheat_flag INTEGER DEFAULT 0, UNIQUE(assignment_id, student_id, question_id))''')
+    try: c.execute("ALTER TABLE scores ADD COLUMN cheat_flag INTEGER DEFAULT 0")
+    except: pass
+    c.execute('''CREATE TABLE IF NOT EXISTS loop_scores (id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_id INTEGER, student_id TEXT, question_id INTEGER, score REAL, asr_text TEXT, audio_path TEXT, is_passed INTEGER DEFAULT 0, cheat_flag INTEGER DEFAULT 0, UNIQUE(assignment_id, student_id, question_id))''')
+    try: c.execute("ALTER TABLE loop_scores ADD COLUMN cheat_flag INTEGER DEFAULT 0")
+    except: pass
     c.execute('''CREATE TABLE IF NOT EXISTS question_bank (id INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT NOT NULL, category TEXT, text TEXT NOT NULL, answer TEXT NOT NULL, baseline_score REAL DEFAULT 85.0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     conn.commit(); conn.close()
 
 init_db()
 
-# --- 1. 基础接口 (登录/作业/题库) 省略无变化部分，保持紧凑 ---
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
+    username, password, role, class_code = data['username'], data['password'], data['role'], data.get('class_code')
     conn = get_db_connection()
-    if conn.execute("SELECT id FROM users WHERE username=?", (data['username'],)).fetchone(): return jsonify({"status": "error", "msg": "已存在"}), 400
-    cls = conn.execute("SELECT id FROM classes WHERE class_code=?", (data.get('class_code'),)).fetchone()
-    if data['role'] == 'student' and not cls: return jsonify({"status": "error", "msg": "班级不存在"}), 400
-    class_id = cls['id'] if cls else conn.execute("INSERT INTO classes (class_code, name) VALUES (?, ?)", (data.get('class_code'), f"班级 {data.get('class_code')}")).lastrowid
-    cur = conn.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (data['username'], generate_password_hash(data['password']), data['role']))
+    if conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone(): return jsonify({"status": "error", "msg": "已存在"}), 400
+    cls = conn.execute("SELECT id FROM classes WHERE class_code=?", (class_code,)).fetchone()
+    if role == 'student':
+        if not cls: return jsonify({"status": "error", "msg": "班级不存在"}), 400
+        class_id = cls['id']
+    else: class_id = cls['id'] if cls else conn.execute("INSERT INTO classes (class_code, name) VALUES (?, ?)", (class_code, f"班级 {class_code}")).lastrowid
+    cur = conn.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (username, generate_password_hash(password), role))
     conn.execute("INSERT INTO user_classes (user_id, class_id) VALUES (?, ?)", (cur.lastrowid, class_id))
     conn.commit(); conn.close()
     return jsonify({"status": "success"})
@@ -90,9 +98,10 @@ def get_all_assignments():
 @app.route('/api/assignment/new', methods=['POST'])
 def new_assignment():
     data = request.json
+    class_id, name, passing_rate, v_mode = data['class_id'], data.get('name', "新建作业"), float(data.get('passing_rate', 80))/100.0, int(data.get('require_vision', 0))
     conn = get_db_connection()
-    conn.execute("UPDATE assignments SET is_active=0 WHERE class_id=?", (data['class_id'],))
-    conn.execute("INSERT INTO assignments (class_id, name, passing_rate, is_active) VALUES (?, ?, ?, 1)", (data['class_id'], data.get('name', "新建作业"), float(data.get('passing_rate', 80))/100.0))
+    conn.execute("UPDATE assignments SET is_active=0 WHERE class_id=?", (class_id,))
+    conn.execute("INSERT INTO assignments (class_id, name, passing_rate, require_vision, is_active) VALUES (?, ?, ?, ?, 1)", (class_id, name, passing_rate, v_mode))
     conn.commit(); conn.close()
     return jsonify({"status": "success"})
 
@@ -117,17 +126,18 @@ def get_scores():
     scores = conn.execute(f"SELECT * FROM {table_name} WHERE assignment_id=?", (assign_id,)).fetchall()
     score_map = {}
     for s in scores:
-        if s['student_id'] not in score_map: score_map[s['student_id']] = {}
-        score_map[s['student_id']][s['question_id']] = dict(s)
+        sid, qid = s['student_id'], s['question_id']
+        if sid not in score_map: score_map[sid] = {}
+        score_map[sid][qid] = dict(s)
     submitted_students =[sid for sid in all_students if sid in score_map]
     unsubmitted_students =[sid for sid in all_students if sid not in score_map]
     result_list =[]
     for sid in submitted_students:
         for q_id in q_ids:
             if q_id in score_map[sid]: result_list.append(score_map[sid][q_id])
-            else: result_list.append({"student_id": sid, "question_id": q_id, "score": "-", "is_passed": None, "audio_path": None, "is_partial_missing": True})
+            else: result_list.append({"student_id": sid, "question_id": q_id, "score": "-", "is_passed": None, "audio_path": None, "cheat_flag": 0, "is_partial_missing": True})
     for sid in unsubmitted_students:
-        result_list.append({"student_id": sid, "question_id": "-", "score": "-", "is_passed": None, "audio_path": None, "is_total_missing": True})
+        result_list.append({"student_id": sid, "question_id": "-", "score": "-", "is_passed": None, "audio_path": None, "cheat_flag": 0, "is_total_missing": True})
     conn.close()
     return jsonify(result_list)
 
@@ -145,9 +155,9 @@ def class_overview():
     scores = conn.execute(f"SELECT * FROM {table_name} WHERE assignment_id=?", (assign_id,)).fetchall()
     score_map = {}
     for s in scores:
-        if s['student_id'] not in score_map: score_map[s['student_id']] = []
+        if s['student_id'] not in score_map: score_map[s['student_id']] =[]
         score_map[s['student_id']].append(dict(s))
-    overview = []
+    overview =[]
     for stu in students:
         sid = stu['username']
         stu_scores = score_map.get(sid,[])
@@ -155,10 +165,15 @@ def class_overview():
         else:
             submitted_qids = [s['question_id'] for s in stu_scores]
             missing_idx =[str(q_map[qid]) for qid in q_map if qid not in submitted_qids]
-            failed_idx = [str(q_map[s['question_id']]) for s in stu_scores if not s['is_passed']]
+            failed_idx =[str(q_map[s['question_id']]) for s in stu_scores if not s['is_passed']]
+            # 添加作弊记录显示
+            cheated_idx = [str(q_map[s['question_id']]) for s in stu_scores if s.get('cheat_flag') == 1]
+            
             issues =[]
             if missing_idx: issues.append(f"漏交第 {','.join(missing_idx)} 题")
-            if failed_idx: issues.append(f"第 {','.join(failed_idx)} 题不合格")
+            if failed_idx: issues.append(f"第 {','.join(failed_idx)} 题错误")
+            if cheated_idx: issues.append(f"第 {','.join(cheated_idx)} 题涉嫌作弊")
+            
             if issues: status, detail = "不合格", "；".join(issues)
             else: status, detail = ("全部合格", "完美过关") if len(stu_scores) == len(qs) else ("不合格", "异常")
         overview.append({"student_id": sid, "status": status, "detail": detail})
@@ -215,7 +230,6 @@ def import_txt():
     conn.commit(); conn.close()
     return jsonify({"status": "success", "count": count})
 
-# --- 2. AI 出题接口 ---
 @app.route('/api/ai/generate', methods=['POST'])
 def ai_generate():
     data = request.json
@@ -230,28 +244,27 @@ def ai_generate():
     api_url = "https://api.siliconflow.cn/v1/chat/completions"
 
     if subject == 'en':
-        system_prompt = f"""你是一个资深的中小学英语教研专家，精通中国各地官方中小学英语教材（默认以人教版PEP为基准）。
-        请根据用户提供的知识点（含学生年龄/年级），生成 {count} 道英语口语交际或课文背诵测试题。
+        system_prompt = f"""你是一个资深中小学英语教研专家。请生成 {count} 道测试题。
         【绝对铁律】：
-        1. 词汇精准降维：题目单词必须严格以老师要求的年龄/学段为基准，绝不超纲！
-        2. 情境对话优先：除非明确要求“背诵全文”，否则必须出真实的对话情境发问，答案是课本对应的下半句应答！
-        3. 必须返回纯粹、合法的 JSON 格式。
-        4. 答案语言与标点：标准答案必须是纯英文，数字拼写为英文单词。保留正常标点！
-        格式：{{"data":[ {{"text":"Good morning, class! How are you today?", "answer":"We are fine, thank you."}} ]}}"""
+        1. 词汇精准降维：严格匹配老师要求的年龄/学段，绝不超纲！
+        2. 情境对话优先：除非指定全文，必须出真实的对话情境发问，答案是对应应答。
+        3. 必须返回JSON。
+        4. 答案必须纯英文（数字转英文单词）。保留正常标点！
+        格式：{{"data":[ {{"text":"How are you?", "answer":"I am fine, thank you."}} ]}}"""
     elif subject == 'science':
-        system_prompt = f"""你是一个资深中小学数理化教研专家。请生成 {count} 道概念背诵测试题。
+        system_prompt = f"""你是一个资深数理化教研专家。请生成 {count} 道背诵测试题。
         【绝对铁律】：
-        1. 强制全量穷举：如果是集合范围(如质数、乘法表)，答案必须包含该范围的所有项，绝对不准用省略号！
-        2. 必须返回纯粹、合法的 JSON 格式。
-        3. 纯汉字读音：标准答案必须全部转化为纯中文汉字读音（'a²'写'a的平方'，'='写'等于'），保留正常标点！
+        1. 强制全量穷举：如果是集合范围(如质数)，答案包含该范围所有项，不准省略！
+        2. 必须返回JSON。
+        3. 标准答案纯汉字读音（'a²'写'a的平方'，'='写'等于'），保留正常标点！
         格式：{{"data":[ {{"text":"勾股定理？", "answer":"a的平方加b的平方，等于c的平方。"}} ]}}"""
     else:
-        system_prompt = f"""你是一个资深中小学语文教研专家。请生成 {count} 道语文背诵测试题。
+        system_prompt = f"""你是一个资深中小学语文教研专家。请生成 {count} 道语文测试题。
         【绝对铁律】：
-        1. 封杀阅读理解：绝对不允许出现“表达了什么感情”的提问！必须以“请背诵XXX”提问。
+        1. 封杀阅读理解：绝对不出现“表达了什么感情”的提问！必须以“请背诵XXX”提问。
         2. 强制全文/全段：严格按照课标提取整段，绝对不允许使用省略号！
-        3. 必须返回纯粹、合法的 JSON 格式。
-        4. 答案必须是纯汉字，并保留正确的中文标点符号！
+        3. 必须返回JSON。
+        4. 答案必须纯汉字，保留正确中文标点！
         格式：{{"data":[ {{"text":"背诵静夜思。", "answer":"床前明月光，疑是地上霜。举头望明月，低头思故乡。"}} ]}}"""
 
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -269,18 +282,19 @@ def ai_generate():
         conn = get_db_connection(); conn.execute("UPDATE users SET ai_quota=? WHERE id=?", (new_quota+1, user['id'])); conn.commit(); conn.close()
         return jsonify({"status": "error", "msg": f"失败: {str(e)}"}), 500
 
-# --- 3. 语音寻人接口 ---
 @app.route('/api/students/match', methods=['GET'])
 def match_student():
     voice_text = request.args.get('text', '')
     class_id = request.args.get('class_id')
-    if not voice_text: return jsonify({"status": "error", "msg": "未听到声音"})
+    if not voice_text: return jsonify({"status": "error", "msg": "未听清"})
     conn = get_db_connection()
     students = conn.execute('''SELECT u.username FROM users u JOIN user_classes uc ON u.id=uc.user_id WHERE uc.class_id=? AND u.role='student' ''', (class_id,)).fetchall()
     conn.close()
+    
     vt = voice_text.lower()
     for k, v in {'一':'1','幺':'1','二':'2','两':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9','零':'0'}.items(): vt = vt.replace(k, v)
     vt = re.sub(r'[^\w]', '', vt) 
+    
     best_match, max_score = None, 0
     for s in students:
         uname = str(s['username']).lower()
@@ -288,14 +302,58 @@ def match_student():
         score = difflib.SequenceMatcher(None, uname, vt).ratio()
         if score > max_score: max_score, best_match = score, s['username']
     if best_match and max_score > 0.35: return jsonify({"status": "success", "username": best_match})
-    return jsonify({"status": "error", "msg": "未找到匹配"})
+    return jsonify({"status": "error", "msg": "未找到"})
 
-# --- 4. 语音评测打分 (🌟 核心：双轨算法按 Mode 区分调用) ---
+# 🌟 视觉防作弊接口：接收前端截图
+@app.route('/api/vision/anti_cheat', methods=['POST'])
+def anti_cheat():
+    data = request.json
+    image_b64 = data.get('image')
+    student_id = data.get('student_id', 'unknown')
+    assign_id = data.get('assign_id', '0')
+    q_id = data.get('q_id', '0')
+    
+    if not image_b64: return jsonify({"status": "error", "msg": "未收到画面"}), 400
+    eye_status = detect_eye_status_base64(image_b64, student_id, assign_id, q_id)
+    return jsonify({"status": "success", "eye_status": eye_status})
+
+# 🌟 核心：提取题目 ID 发给前端留证
+@app.route('/api/admin/cheat_records', methods=['GET'])
+def get_cheat_records():
+    if not os.path.exists(CHEAT_DIR): return jsonify([])
+    assign_id = request.args.get('assign_id', '')
+    q_id_filter = request.args.get('q_id', '')
+    
+    files =[f for f in os.listdir(CHEAT_DIR) if f.endswith('.jpg')]
+    if assign_id: files =[f for f in files if f"_a{assign_id}_" in f]
+    if q_id_filter: files =[f for f in files if f"_q{q_id_filter}_" in f]
+    
+    files.sort(key=lambda x: os.path.getmtime(os.path.join(CHEAT_DIR, x)), reverse=True)
+    
+    records =[]
+    for f in files:
+        parts = f.split('_') # 格式：stu_a1_q123_171...jpg
+        stu_id = parts[0] if len(parts) > 0 else "未知"
+        q_id = parts[2].replace('q', '') if len(parts) > 2 else "未知"
+        try: time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(parts[3].split('.')[0])))
+        except: time_str = "未知时间"
+        records.append({"student_id": stu_id, "q_id": q_id, "time": time_str, "filename": f, "url": f"/api/cheat_image/{f}"})
+    return jsonify(records)
+
+@app.route('/api/cheat_image/<filename>')
+def serve_cheat_image(filename):
+    file_path = os.path.join(CHEAT_DIR, filename)
+    if os.path.exists(file_path): return send_file(file_path, mimetype='image/jpeg')
+    return "Not Found", 404
+
+# 🌟 评测打分：补录洗白机制
 @app.route('/recognize_and_evaluate', methods=['POST'])
 def evaluate():
     audio_file, s_id, q_id = request.files['user_audio'], request.form['student_id'], request.form['question_id']
     lang, standard_answer = request.form['language'], request.form['standard_answer']
     mode = request.form.get('mode', 'normal')
+    cheat_flag = int(request.form.get('cheat_flag', 0)) 
+    
     table_name = 'loop_scores' if mode == 'loop' else 'scores'
     
     if lang == 'science': lang = 'zh'
@@ -313,28 +371,24 @@ def evaluate():
     diff_html = generate_diff_html(raw_asr_text, standard_answer)
     asr_text = normalize_text(raw_asr_text)
     
-    # 🌟 根据不同场景调用不同的算法容错率
-    if mode == 'loop':
-        score_100 = round(calculate_semantic_correctness_ms_loop(asr_text, standard_answer) * 100, 2)
-    else:
-        score_100 = round(calculate_semantic_correctness_ms_strict(asr_text, standard_answer) * 100, 2)
+    if mode == 'loop': score_100 = round(calculate_semantic_correctness_ms_loop(asr_text, standard_answer) * 100, 2)
+    else: score_100 = round(calculate_semantic_correctness_ms_strict(asr_text, standard_answer) * 100, 2)
         
     q_info = conn.execute("SELECT baseline_score, is_fixed_baseline FROM questions WHERE id=?", (q_id,)).fetchone()
     current_baseline, is_fixed = q_info['baseline_score'], q_info['is_fixed_baseline']
     threshold = current_baseline * passing_rate
     is_passed_now = 1 if score_100 >= threshold else 0
     
-    old = conn.execute(f"SELECT score, audio_path, is_passed FROM {table_name} WHERE assignment_id=? AND student_id=? AND question_id=?", (assign_id, s_id, q_id)).fetchone()
+    old = conn.execute(f"SELECT score, audio_path, is_passed, cheat_flag FROM {table_name} WHERE assignment_id=? AND student_id=? AND question_id=?", (assign_id, s_id, q_id)).fetchone()
     final_is_passed = 1 if (is_passed_now or (old and old['is_passed'])) else 0
     
     is_best = False
-    if not old or score_100 > old['score']:
+    # 🌟 洗白逻辑：如果这次没有作弊(0)，且原先有作弊(1)，或者是最高分，一律覆盖记录！
+    if not old or score_100 > old['score'] or (old['cheat_flag'] == 1 and cheat_flag == 0):
         is_best = True
         if old and os.path.exists(os.path.join(AUDIO_DIR, old['audio_path'])): os.remove(os.path.join(AUDIO_DIR, old['audio_path']))
-        conn.execute(f'''INSERT INTO {table_name} (assignment_id, student_id, question_id, score, asr_text, audio_path, is_passed) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(assignment_id, student_id, question_id) DO UPDATE SET score=excluded.score, asr_text=excluded.asr_text, audio_path=excluded.audio_path, is_passed=excluded.is_passed''', (assign_id, s_id, q_id, score_100, asr_text, temp_name, final_is_passed))
-        
-        # 仅普通作业模式推高基准线，循环模式的嘈杂环境不作为标杆
-        if mode == 'normal' and score_100 > current_baseline and not is_fixed: 
+        conn.execute(f'''INSERT INTO {table_name} (assignment_id, student_id, question_id, score, asr_text, audio_path, is_passed, cheat_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(assignment_id, student_id, question_id) DO UPDATE SET score=excluded.score, asr_text=excluded.asr_text, audio_path=excluded.audio_path, is_passed=excluded.is_passed, cheat_flag=excluded.cheat_flag''', (assign_id, s_id, q_id, score_100, asr_text, temp_name, final_is_passed, cheat_flag))
+        if mode == 'normal' and score_100 > current_baseline and not is_fixed and cheat_flag == 0: 
             conn.execute("UPDATE questions SET baseline_score=? WHERE id=?", (score_100, q_id))
         conn.commit()
     else: os.remove(temp_path) 
@@ -377,18 +431,18 @@ def synthesize():
     if path and os.path.exists(path): return send_file(path, mimetype="audio/wav")
     return "TTS Error", 500
 
-# 🌟 5. 新增 OTA 机器人固件下载接口
 @app.route('/ota/<filename>')
 def serve_ota_firmware(filename):
     file_path = os.path.join(OTA_DIR, filename)
-    if os.path.exists(file_path):
-        return send_file(file_path, mimetype='application/octet-stream')
+    if os.path.exists(file_path): return send_file(file_path, mimetype='application/octet-stream')
     return "Firmware Not Found", 404
 
-# 6. 网页托管
 @app.route('/')
 def index(): return send_file('login.html', max_age=3600)
 @app.route('/<path:filename>')
 def serve_html(filename):
     if os.path.exists(filename): return send_file(filename)
     return "Not Found", 404
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, ssl_context=('cert.pem', 'key.pem'), threaded=True)

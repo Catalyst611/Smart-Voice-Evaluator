@@ -20,7 +20,6 @@
         tbody td { padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: left; }
         .btn { padding: 5px 10px; cursor: pointer; border: none; border-radius: 4px; margin: 2px; color: white;}
         .btn-add { background: #1890ff; } .btn-del { background: #ff4d4f; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -47,15 +46,14 @@
 
 <div class="panel active" id="panel-current">
     <div class="card" style="margin-bottom: 20px; background: #e6f7ff; border-left: 5px solid #1890ff;">
+        <!-- 顶部：当前作业与讲台模式控制 -->
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h3 style="margin:0;">当前作业：<span id="curr-assign-name" style="color:#d35400;">加载中...</span></h3>
+            <div>
+                <h3 style="margin:0;">当前作业：<span id="curr-assign-name" style="color:#d35400;">加载中...</span></h3>
+            </div>
             <div style="background:#fdebd0; padding:6px 12px; border-radius:8px; border:1px solid #f1c40f;">
                 <label style="color:#d35400; font-weight:bold; cursor:pointer; margin-right:5px; font-size:14px;">
-                    <select id="loopVisionSelect" style="padding:4px; border-radius:4px; border:1px solid #d35400; color:#d35400; font-weight:bold;">
-                        <option value="0">❌ 关闭摄像头</option>
-                        <option value="1">👁️ 随机关键帧抓拍</option>
-                        <option value="2">📹 全程视频流检测</option>
-                    </select>
+                    <input type="checkbox" id="enableVision" checked> 👁️ 讲台循环监考
                 </label>
                 <button class="btn" style="background: #e74c3c; padding: 5px 15px; font-weight:bold; margin:0;" onclick="openLoopMode()">🎙️ 启动讲台模式</button>
             </div>
@@ -63,28 +61,29 @@
         
         <hr style="border:0; border-top:1px dashed #bcdcff; margin:15px 0;">
         
+        <!-- 底部：发布新作业（带家庭防作弊开关） -->
         <div style="display:flex; gap:10px; align-items:center;">
             <input id="newAssignName" placeholder="新作业名称" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; width: 160px;">
             <input id="assignPassRate" type="number" placeholder="合格率(%) 默认80" value="80" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc; width: 120px;">
             
+            <!-- 🌟 核心新增：学生家庭作业监考配置 -->
             <label style="font-size:14px; cursor:pointer; font-weight:bold; color:#2c3e50; margin-left:10px;">
-                学生端监考模式：
-                <select id="assignRequireVision" style="padding:4px; border-radius:4px;">
-                    <option value="0">无监考 (纯语音)</option>
-                    <option value="1">随机关键帧抓拍</option>
-                    <option value="2">全程视频流检测</option>
-                </select>
+                <input type="checkbox" id="assignRequireVision"> 📸 开启学生家庭监考
             </label>
+            
             <button class="btn" style="background: #52c41a; padding: 8px 15px; margin-left:auto;" onclick="createNewAssignment()">➕ 发布新作业</button>
         </div>
     </div>
-
+    
+    <!-- ...(下面的网格和表格部分保持不变)... -->
     <div class="grid">
         <div class="card">
             <h2>题目管理</h2>
             <div style="margin-bottom:10px;">
                 <input id="nT" placeholder="题目" style="width:120px;"> <input id="nA" placeholder="答案" style="width:120px;"> 
-                <select id="nL"><option value="zh">语文</option><option value="en">英语</option><option value="science">数理化</option></select>
+                <select id="nL">
+                    <option value="zh">语文</option><option value="en">英语</option><option value="science">数理化</option>
+                </select>
                 <button class="btn btn-add" onclick="addQ()">手工添加</button>
                 <button class="btn" style="background:#8e44ad;" onclick="openBankModal()">🗂️ 题库</button>
                 <button class="btn" style="background:#f39c12;" onclick="openAiModal()">✨ AI批量出题</button>
@@ -98,13 +97,13 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h2 style="margin:0;">学生成绩榜 (实时刷新)</h2>
                 <div>
+                    <!-- 隔离查看不同模式的数据 -->
                     <select id="scoreModeSelect" onchange="switchScoreMode()" style="padding: 8px; font-weight:bold; color:#e74c3c; border:1px solid #e74c3c; border-radius: 4px; margin-right: 10px;">
                         <option value="normal">🏠 课后作业数据</option>
                         <option value="loop">🎙️ 讲台循环数据</option>
                     </select>
                     <button class="btn" style="background:#34495e;" onclick="viewClassOverview()">📊 班级总览</button>
-                    <!-- 🌟 作弊画廊入口 -->
-                    <button class="btn" style="background:#c0392b; font-weight:bold; animation: pulse 2s infinite;" onclick="openCheatModal()">📸 疑似作弊抓拍</button>
+		    <button class="btn" style="background:#c0392b; font-weight:bold; animation: pulse 2s infinite;" onclick="openCheatModal()">📸 智能监考抓拍</button>
                 </div>
             </div>
             <div class="table-container">
@@ -166,11 +165,17 @@
     </div>
 </div>
 
+<!-- 🌟 新增：监考抓拍留证弹窗 -->
 <div id="cheatModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:999; align-items:center; justify-content:center;">
     <div style="background:#fff; width:800px; max-height:85vh; padding:30px; border-radius:12px; overflow-y:auto; position:relative;">
         <h2 style="margin-top:0; color:#c0392b; border-bottom:2px solid #eee; padding-bottom:10px;">📸 AI 视觉监考：疑似作弊抓拍库</h2>
-        <p style="color:#666; font-size:14px;">(注：学生补考通过后此处记录依然保留，供老师核查初犯情况)</p>
-        <div id="cheatGallery" style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top:20px;"></div>
+        <p style="color:#666; font-size:14px;">以下照片为系统侦测到学生在背诵期间连续睁眼超过 3 秒的关键帧留证。</p>
+        
+        <!-- 照片画廊容器 -->
+        <div id="cheatGallery" style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top:20px;">
+            <!-- 动态生成照片卡片 -->
+        </div>
+
         <div style="margin-top:25px; text-align:right;">
             <button class="btn" style="background:#7f8c8d; font-size:16px; padding:10px 20px;" onclick="document.getElementById('cheatModal').style.display='none'">关闭留证中心</button>
         </div>
@@ -191,11 +196,11 @@
     }
     function logout() { localStorage.clear(); window.location.href = 'login.html'; }
 
-    // 讲台模式携带监考参数
     function openLoopMode() {
         if(!currentAssignId) return alert("请先布置一个作业！");
-        const vMode = document.getElementById('loopVisionSelect').value;
-        window.open(`class_loop.html?class_id=${currentClassId}&assign_id=${currentAssignId}&vision_mode=${vMode}`, '_blank');
+        // 🌟 读取老师是否勾选了防作弊，通过 URL 传给循环考试页面
+        const useVision = document.getElementById('enableVision').checked ? 1 : 0;
+        window.open(`class_loop.html?class_id=${currentClassId}&assign_id=${currentAssignId}&vision=${useVision}`, '_blank');
     }
 
     function switchScoreMode() {
@@ -219,32 +224,7 @@
         } catch(e) { document.getElementById('overviewTbody').innerHTML = `<tr><td colspan="3" style="color:red;">加载失败</td></tr>`; }
     }
 
-    async function openCheatModal() {
-        if(!currentAssignId) return alert("请先选择一个作业！");
-        document.getElementById('cheatModal').style.display = 'flex';
-        const gallery = document.getElementById('cheatGallery');
-        gallery.innerHTML = '<p>正在加载云端数据...</p>';
-        try {
-            const res = await fetch(`${API}/admin/cheat_records?assign_id=${currentAssignId}`);
-            const data = await res.json();
-            if (data.length === 0) {
-                gallery.innerHTML = '<p style="color:#2ecc71; font-weight:bold; grid-column: span 2; text-align:center;">🎉 暂无作弊记录，考风考纪良好！</p>';
-                return;
-            }
-            gallery.innerHTML = data.map(record => `
-                <div style="border:1px solid #ddd; border-radius:8px; overflow:hidden; background:#f9f9f9; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
-                    <img src="${BASE}${record.url}" style="width:100%; height:200px; object-fit:cover; display:block;">
-                    <div style="padding:10px;">
-                        <div style="font-weight:bold; color:#c0392b; font-size:18px;">学号：${record.student_id}</div>
-                        <div style="color:#e67e22; font-size:14px; margin-top:5px;">⚠️ 涉事题号：Q${record.q_id}</div>
-                        <div style="color:#7f8c8d; font-size:12px; margin-top:5px;">🕒 ${record.time}</div>
-                    </div>
-                </div>
-            `).join('');
-        } catch(e) { gallery.innerHTML = '<p style="color:red;">加载失败</p>'; }
-    }
-
-    // 🌟 这里是补全的 AI 与题库逻辑
+    /* 题库与 AI 操作 */
     function openBankModal() { if(!currentAssignId) return alert("请先布置作业！"); document.getElementById('bankModal').style.display = 'flex'; loadModalBank(); }
     async function loadModalBank() {
         const subj = document.getElementById('bankSubj').value;
@@ -276,10 +256,17 @@
         document.getElementById('classSelect').innerHTML = classes.map(c => `<option value="${c.id}">班级：${c.class_code} (${c.name})</option>`).join('');
         if(classes.length > 0) { currentClassId = classes[0].id; switchTab('current'); } else { alert("请绑定新班级"); }
     }
+    async function joinNewClass() {
+        const code = prompt("请输入班级码：");
+        if(code) { await fetch(`${API}/teacher/join_class`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:currentUsername, class_code:code})}); loadClasses(); }
+    }
     function onClassChange() { currentClassId = document.getElementById('classSelect').value; switchTab('current'); }
     function switchTab(tab) {
-        document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-        document.getElementById(`tab-${tab}`).classList.add('active'); document.getElementById(`panel-${tab}`).classList.add('active');
+        document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+        document.getElementById(`tab-${tab}`).classList.add('active');
+        document.getElementById(`panel-${tab}`).classList.add('active');
+        
         if(!currentClassId) return;
         if(tab === 'current') { loadCurrentAssign(); refreshTimer = setInterval(loadScores, 4000); } else { clearInterval(refreshTimer); loadHistoryList(); }
     }
@@ -288,25 +275,24 @@
         const assign = await (await fetch(`${API}/assignment/current?class_id=${currentClassId}`)).json();
         if(assign.id) {
             if (currentAssignId !== assign.id) { currentAssignId = assign.id; document.querySelector("#sTable tbody").innerHTML = ''; lastRenderedFiles = {}; }
-            let visionTag = assign.require_vision === 2 ? " <span style='color:#c0392b;'>[📹全视频]</span>" : (assign.require_vision === 1 ? " <span style='color:#e67e22;'>[👁️关键帧]</span>" : " <span style='color:#7f8c8d;'>[无监考]</span>");
-            document.getElementById('curr-assign-name').innerHTML = `${assign.name} (达标线: ${assign.passing_rate * 100}%)${visionTag}`; 
-            loadQ(); loadScores();
+            document.getElementById('curr-assign-name').innerText = `${assign.name} (达标线: ${assign.passing_rate * 100}%)`; loadQ(); loadScores();
         } else { currentAssignId = null; document.getElementById('curr-assign-name').innerText = "暂无作业"; document.querySelector("#qTable tbody").innerHTML = ''; document.querySelector("#sTable tbody").innerHTML = ''; }
     }
     async function createNewAssignment() {
         const name = document.getElementById('newAssignName').value.trim(), rate = document.getElementById('assignPassRate').value || 80;
-        const vMode = document.getElementById('assignRequireVision').value;
         if(!name) return alert("请输入作业名称！");
-        await fetch(`${API}/assignment/new`, { method: 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({class_id: currentClassId, name: name, passing_rate: rate, require_vision: vMode}) });
-        document.getElementById('newAssignName').value = ''; loadCurrentAssign();
+        if(confirm(`确定布置 "${name}"，达标线为 ${rate}% 吗？`)) {
+            await fetch(`${API}/assignment/new`, { method: 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({class_id: currentClassId, name: name, passing_rate: rate}) });
+            document.getElementById('newAssignName').value = ''; loadCurrentAssign();
+        }
     }
-    
+
     function getSubjHtml(lang) { return `<span style="padding:2px 8px; border-radius:4px; font-size:12px; color:white; background:${lang==='zh'?'#f5222d':(lang==='en'?'#1890ff':'#52c41a')}">${lang==='zh'?'语文':(lang==='en'?'英语':'数理化')}</span>`; }
 
     async function loadQ() {
         if(!currentAssignId) return;
         const qs = await (await fetch(`${API}/questions?assignment_id=${currentAssignId}`)).json();
-        document.querySelector("#qTable tbody").innerHTML = qs.map(q => `<tr><td>${q.text}</td><td>${q.answer}</td><td>${getSubjHtml(q.lang)}</td><td><button class="btn btn-del" onclick="delQ(${q.id})">删</button></td></tr>`).join('');
+        document.querySelector("#qTable tbody").innerHTML = qs.map(q => `<tr><td>${q.text}</td><td>${q.answer}</td><td><button class="btn btn-del" onclick="delQ(${q.id})">删</button></td></tr>`).join('');
     }
     async function addQ() {
         if(!currentAssignId) return alert("请先布置作业！");
@@ -315,9 +301,10 @@
     }
     async function delQ(id) { if(confirm("删除该题？")) { await fetch(`${API}/questions/${id}`, {method:'DELETE'}); loadQ(); } }
 
+    // 🌟 终极防护渲染逻辑，绝不打断音频播放
     let lastRenderedFiles = {};
     async function loadScores() {
-        if(!currentAssignId || document.getElementById('overviewModal').style.display === 'flex' || document.getElementById('cheatModal').style.display === 'flex') return;
+        if(!currentAssignId || document.getElementById('overviewModal').style.display === 'flex') return;
         try {
             const mode = document.getElementById('scoreModeSelect').value;
             const res = await fetch(`${API}/admin/scores?assignment_id=${currentAssignId}&mode=${mode}`);
@@ -331,15 +318,9 @@
                 const key = s.is_total_missing ? `row-${s.student_id}-all` : `row-${s.student_id}-${s.question_id}`;
                 newKeys.add(key);
                 
-                let statusHTML = s.is_total_missing ? '<span style="color:#999; font-weight:bold;">全部未交</span>' : 
-                                (s.is_partial_missing ? '<span style="color:#faad14; font-weight:bold;">漏交该题</span>' : 
-                                (s.is_passed ? '<span style="color:#2ecc71; font-weight:bold;">✅ 达标</span>' : '<span style="color:#e74c3c; font-weight:bold;">❌ 未达标</span>'));
-                                
-                if (s.cheat_flag === 1) {
-                    statusHTML += `<br><span style="color:#c0392b; font-size:12px; font-weight:bold; background:#fadbd8; padding:2px 4px; border-radius:4px;">⚠️ 作弊嫌疑</span>`;
-                }
-
+                let statusHTML = s.is_total_missing ? '<span style="color:#999; font-weight:bold;">全部未交</span>' : (s.is_partial_missing ? '<span style="color:#faad14; font-weight:bold;">漏交该题</span>' : (s.is_passed ? '<span style="color:#2ecc71; font-weight:bold;">✅ 达标</span>' : '<span style="color:#e74c3c; font-weight:bold;">❌ 未达标</span>'));
                 let qDisplay = s.is_total_missing ? '全部' : 'Q' + s.question_id;
+                
                 const audioHTML = isUnsub ? '<span style="color:#ccc;">-</span>' : `<audio src="${BASE}/api/audio/${s.audio_path}" controls preload="metadata" style="height:40px; width:220px;"></audio>`;
 
                 const trHTML = `<td>${s.student_id}</td><td>${qDisplay}</td>
@@ -348,23 +329,20 @@
                 
                 let row = document.getElementById(key);
                 if(row) {
-                    if (row.dataset.audio !== (s.audio_path || "") || row.dataset.score !== String(s.score) || row.dataset.cheat !== String(s.cheat_flag)) {
+                    if (row.dataset.audio !== (s.audio_path || "") || row.dataset.score !== String(s.score)) {
                         row.innerHTML = trHTML;
                         row.dataset.audio = s.audio_path || "";
                         row.dataset.score = String(s.score);
-                        row.dataset.cheat = String(s.cheat_flag);
                     }
                 } else { 
                     row = document.createElement('tr'); 
                     row.id = key; row.innerHTML = trHTML; 
                     row.dataset.audio = s.audio_path || "";
                     row.dataset.score = String(s.score);
-                    row.dataset.cheat = String(s.cheat_flag);
                     tbody.appendChild(row); 
                 }
-                if(!isUnsub) lastRenderedFiles[key] = s.audio_path;
             });
-            Array.from(tbody.children).forEach(row => { if (!newKeys.has(row.id)) { row.remove(); delete lastRenderedFiles[row.id]; } });
+            Array.from(tbody.children).forEach(row => { if (!newKeys.has(row.id)) row.remove(); });
             data.forEach(s => { const key = s.is_total_missing ? `row-${s.student_id}-all` : `row-${s.student_id}-${s.question_id}`; const row = document.getElementById(key); if(row) tbody.appendChild(row); });
         } catch(err) {}
     }
@@ -381,12 +359,41 @@
         document.querySelector("#hsTable tbody").innerHTML = (await (await fetch(`${API}/admin/scores?assignment_id=${hId}`)).json()).map(s => {
             const isUnsub = s.is_total_missing || s.is_partial_missing;
             let statusHTML = s.is_total_missing ? '<span style="color:#999; font-weight:bold;">全部未交</span>' : (s.is_partial_missing ? '<span style="color:#faad14; font-weight:bold;">漏交该题</span>' : (s.is_passed ? '✅' : '❌'));
-            if (s.cheat_flag === 1) statusHTML += `<br><span style="color:#c0392b; font-size:12px; font-weight:bold;">⚠️ 作弊</span>`;
             let qDisplay = s.is_total_missing ? '全部题目' : 'Q' + s.question_id;
             return `<tr><td>${s.student_id}</td><td>${qDisplay}</td><td style="color:${isUnsub ? '#999' : '#1890ff'}; font-weight:bold">${s.score}</td><td>${statusHTML}</td><td>${isUnsub ? '-' : `<audio src="${BASE}/api/audio/${s.audio_path}" controls preload="metadata" style="height:40px; width:220px;"></audio>`}</td></tr>`;
         }).join('');
     }
     loadClasses(); 
+
+// 🌟 打开监考抓拍弹窗逻辑
+    async function openCheatModal() {
+        document.getElementById('cheatModal').style.display = 'flex';
+        const gallery = document.getElementById('cheatGallery');
+        gallery.innerHTML = '<p>正在加载云端抓拍数据...</p>';
+        
+        try {
+            const res = await fetch(`${API}/admin/cheat_records`);
+            const data = await res.json();
+            
+            if (data.length === 0) {
+                gallery.innerHTML = '<p style="color:#2ecc71; font-weight:bold; grid-column: span 2; text-align:center;">🎉 暂无作弊记录，考风考纪良好！</p>';
+                return;
+            }
+            
+            gallery.innerHTML = data.map(record => `
+                <div style="border:1px solid #ddd; border-radius:8px; overflow:hidden; background:#f9f9f9; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
+                    <img src="${BASE}${record.url}" style="width:100%; height:200px; object-fit:cover; display:block;" alt="抓拍图片">
+                    <div style="padding:10px;">
+                        <div style="font-weight:bold; color:#c0392b; font-size:18px;">学号/姓名：${record.student_id}</div>
+                        <div style="color:#7f8c8d; font-size:12px; margin-top:5px;">🕒 抓拍时间：${record.time}</div>
+                    </div>
+                </div>
+            `).join('');
+        } catch(e) {
+            gallery.innerHTML = '<p style="color:red;">加载失败，请检查网络</p>';
+        }
+    }
+
 </script>
 </body>
 </html>
